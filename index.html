@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>STREET EMPIRE — San Velor</title>
+<meta name="description" content="STREET EMPIRE — a 3D open-world street racing game set in San Velor." />
+<link rel="stylesheet" href="/src/ui/styles.css" />
+</head>
+<body>
+<div id="app">
+  <canvas id="gl"></canvas>
+  <div id="vignette"></div>
+  <div id="scanlines"></div>
+
+  <!-- ============ IN-GAME HUD ============ -->
+  <div id="hud" class="hidden">
+    <div id="hud-top-left" class="panel-metal">
+      <div class="hud-row"><span class="hud-label">CASH</span><span id="hud-money" class="hud-value money">$0</span></div>
+      <div class="hud-row"><span class="hud-label">REP</span><span id="hud-rep" class="hud-value">0</span></div>
+      <div id="wanted" class="wanted-stars">
+        <span class="wstar">★</span><span class="wstar">★</span><span class="wstar">★</span><span class="wstar">★</span><span class="wstar">★</span>
+      </div>
+    </div>
+
+    <div id="hud-top-right">
+      <div id="hud-clock" class="panel-metal">--:--</div>
+      <div id="hud-district" class="district-tag">SAN VELOR</div>
+      <div id="hud-weather" class="weather-tag">CLEAR</div>
+    </div>
+
+    <div id="hud-top-center">
+      <div id="race-banner" class="hidden">
+        <div class="race-name" id="race-name">EVENT</div>
+        <div class="race-meta"><span id="race-pos">1ST</span><span class="sep">/</span><span id="race-lap">LAP 1/1</span><span class="sep">·</span><span id="race-time">00:00.00</span></div>
+      </div>
+      <div id="objective" class="objective hidden"></div>
+      <div id="drift-meter" class="drift-meter hidden">
+        <div class="drift-score" id="drift-score">0</div>
+        <div class="drift-label">DRIFT</div>
+        <div class="drift-mult" id="drift-mult">x1</div>
+      </div>
+    </div>
+
+    <div id="prompt" class="prompt hidden"><kbd>E</kbd> <span id="prompt-text">Enter</span></div>
+
+    <div id="speedo" class="hidden">
+      <div class="speedo-dial">
+        <svg viewBox="0 0 200 200" class="gauge">
+          <defs>
+            <linearGradient id="rpmGrad" x1="0" y1="1" x2="1" y2="0">
+              <stop offset="0%" stop-color="#25e0d0"/><stop offset="62%" stop-color="#ffd543"/><stop offset="88%" stop-color="#ff4d4d"/>
+            </linearGradient>
+          </defs>
+          <circle cx="100" cy="100" r="92" class="gauge-bg"/>
+          <path id="rpm-arc" class="gauge-arc" d="" />
+          <path id="rpm-arc-glow" class="gauge-arc-glow" d="" />
+          <g id="speedo-ticks"></g>
+          <circle cx="100" cy="100" r="64" class="gauge-inner"/>
+        </svg>
+        <div class="speedo-digital">
+          <div id="speed-val">0</div>
+          <div class="speed-unit">KM/H</div>
+        </div>
+        <div class="gear-box"><span id="gear-val">N</span></div>
+        <div class="speedo-car"><span id="car-name">VEHICLE</span><span id="car-hp">0 HP</span></div>
+      </div>
+      <div id="nitro-bar" class="nitro-bar hidden"><i id="nitro-fill"></i><span>NITRO</span></div>
+    </div>
+
+    <div id="minimap-wrap">
+      <canvas id="minimap" width="200" height="200"></canvas>
+      <div class="minimap-ring"></div>
+      <div id="map-coords">SAN VELOR</div>
+    </div>
+
+    <div id="toasts"></div>
+    <div id="countdown" class="countdown hidden"></div>
+    <div id="center-msg" class="center-msg hidden"></div>
+    <div id="damage-flash"></div>
+  </div>
+
+  <!-- ============ LOADING ============ -->
+  <div id="loading" class="screen">
+    <div class="load-inner">
+      <div class="logo-block">
+        <div class="logo-title">STREET<span>EMPIRE</span></div>
+        <div class="logo-sub">SAN VELOR · CALIFORNIA</div>
+      </div>
+      <div class="load-bar"><i id="load-fill"></i></div>
+      <div id="load-text" class="load-text">INITIALIZING ENGINE...</div>
+      <div class="load-tip">TIP: SPACE IS THE HANDBRAKE. USE IT.</div>
+    </div>
+  </div>
+
+  <!-- ============ MAIN MENU ============ -->
+  <div id="menu" class="screen hidden">
+    <div class="menu-bg-grad"></div>
+    <div class="menu-logo">
+      <h1>STREET<span>EMPIRE</span></h1>
+      <p class="tagline">OWN THE NIGHT · SAN VELOR</p>
+    </div>
+    <div class="menu-right">
+      <div class="menu-profile panel-metal" id="menu-profile">
+        <div class="mp-top"><span class="mp-name">DRIVER</span><span class="mp-rank" id="mp-rank">ROOKIE</span></div>
+        <div class="mp-stats">
+          <div><span>CASH</span><b id="mp-money">$0</b></div>
+          <div><span>REP</span><b id="mp-rep">0</b></div>
+          <div><span>CARS</span><b id="mp-cars">0</b></div>
+          <div><span>RACES WON</span><b id="mp-wins">0</b></div>
+        </div>
+      </div>
+      <nav class="menu-nav">
+        <button id="btn-continue" class="menu-btn primary" disabled><span class="mb-label">CONTINUE</span><span class="mb-sub">Load last save</span></button>
+        <button id="btn-newgame" class="menu-btn"><span class="mb-label">NEW GAME</span><span class="mb-sub">Start from the bottom</span></button>
+        <button id="btn-garage-menu" class="menu-btn"><span class="mb-label">GARAGE</span><span class="mb-sub">Cars · tuning · collection</span></button>
+        <button id="btn-dealer-menu" class="menu-btn"><span class="mb-label">DEALERSHIP</span><span class="mb-sub">Buy your next ride</span></button>
+        <button id="btn-settings-menu" class="menu-btn"><span class="mb-label">SETTINGS</span><span class="mb-sub">Video · audio · controls</span></button>
+        <button id="btn-credits" class="menu-btn"><span class="mb-label">CONTROLS</span><span class="mb-sub">How to play</span></button>
+      </nav>
+    </div>
+    <div class="menu-footer">
+      <span>© 2004—2026 SAN VELOR UNDERGROUND</span>
+      <span>v1.0 · BUILD 2004.11</span>
+    </div>
+  </div>
+
+  <!-- ============ PAUSE ============ -->
+  <div id="pause" class="screen modal-screen hidden">
+    <div class="modal panel-metal">
+      <h2>PAUSED</h2>
+      <button id="btn-resume" class="menu-btn primary"><span class="mb-label">RESUME</span></button>
+      <button id="btn-pause-garage" class="menu-btn"><span class="mb-label">GARAGE</span></button>
+      <button id="btn-pause-settings" class="menu-btn"><span class="mb-label">SETTINGS</span></button>
+      <button id="btn-pause-save" class="menu-btn"><span class="mb-label">SAVE GAME</span></button>
+      <button id="btn-pause-menu" class="menu-btn danger"><span class="mb-label">MAIN MENU</span></button>
+      <div class="pause-keys">
+        <div><kbd>W A S D</kbd> Move / Drive</div>
+        <div><kbd>SHIFT</kbd> Sprint / Nitro</div>
+        <div><kbd>SPACE</kbd> Handbrake</div>
+        <div><kbd>E</kbd> Enter / Interact</div>
+        <div><kbd>C</kbd> Camera</div>
+        <div><kbd>M</kbd> Map</div>
+        <div><kbd>ESC</kbd> Pause</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ SETTINGS ============ -->
+  <div id="settings" class="screen modal-screen hidden">
+    <div class="modal wide panel-metal">
+      <h2>SETTINGS</h2>
+      <div class="settings-grid">
+        <div class="settings-col">
+          <h3>VIDEO</h3>
+          <label class="set-row">Quality
+            <select id="set-quality">
+              <option value="low">LOW</option>
+              <option value="medium">MEDIUM</option>
+              <option value="high">HIGH</option>
+            </select>
+          </label>
+          <label class="set-row">Shadow detail
+            <select id="set-shadows"><option value="off">OFF</option><option value="low">LOW</option><option value="high">HIGH</option></select>
+          </label>
+          <label class="set-row">Bloom / neon glow
+            <input type="checkbox" id="set-bloom" />
+          </label>
+          <label class="set-row">Fog &amp; weather
+            <input type="checkbox" id="set-weather" />
+          </label>
+          <label class="set-row">Field of view <span id="fov-out" class="val">70</span>
+            <input type="range" id="set-fov" min="55" max="95" step="1" />
+          </label>
+          <label class="set-row">Draw distance <span id="dd-out" class="val">MED</span>
+            <input type="range" id="set-fogdist" min="0" max="2" step="1" />
+          </label>
+        </div>
+        <div class="settings-col">
+          <h3>AUDIO</h3>
+          <label class="set-row">Master <span id="vol-master-out" class="val">80</span>
+            <input type="range" id="set-vol-master" min="0" max="100" step="1" />
+          </label>
+          <label class="set-row">Engine &amp; SFX <span id="vol-sfx-out" class="val">85</span>
+            <input type="range" id="set-vol-sfx" min="0" max="100" step="1" />
+          </label>
+          <label class="set-row">Music <span id="vol-music-out" class="val">45</span>
+            <input type="range" id="set-vol-music" min="0" max="100" step="1" />
+          </label>
+          <label class="set-row">Ambient city <span id="vol-amb-out" class="val">60</span>
+            <input type="range" id="set-vol-amb" min="0" max="100" step="1" />
+          </label>
+          <h3>GAMEPLAY</h3>
+          <label class="set-row">Transmission
+            <select id="set-trans"><option value="auto">AUTOMATIC</option><option value="manual">MANUAL</option></select>
+          </label>
+          <label class="set-row">Camera distance <span id="cam-out" class="val">6.5</span>
+            <input type="range" id="set-camdist" min="4" max="12" step="0.5" />
+          </label>
+          <label class="set-row">Mouse sensitivity <span id="sens-out" class="val">1.0</span>
+            <input type="range" id="set-sens" min="0.2" max="2.5" step="0.1" />
+          </label>
+          <label class="set-row">Time of day
+            <select id="set-time"><option value="live">LIVE CYCLE</option><option value="day">DAY</option><option value="dusk">DUSK</option><option value="night">NIGHT</option></select>
+          </label>
+          <label class="set-row">Invert camera Y
+            <input type="checkbox" id="set-inverty" />
+          </label>
+          <label class="set-row">Driving assists
+            <input type="checkbox" id="set-assists" />
+          </label>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button id="btn-settings-back" class="menu-btn primary small"><span class="mb-label">BACK</span></button>
+        <button id="btn-wipe-save" class="menu-btn danger small"><span class="mb-label">ERASE SAVE</span></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ CONTROLS / CREDITS ============ -->
+  <div id="credits" class="screen modal-screen hidden">
+    <div class="modal wide panel-metal">
+      <h2>HOW TO PLAY</h2>
+      <div class="credits-grid">
+        <div>
+          <h3>ON FOOT</h3>
+          <p><kbd>W A S D</kbd> walk · <kbd>SHIFT</kbd> sprint · <kbd>E</kbd> enter car / interact</p>
+          <h3>DRIVING</h3>
+          <p><kbd>W</kbd> throttle · <kbd>S</kbd> brake / reverse · <kbd>A D</kbd> steer<br/>
+             <kbd>SPACE</kbd> handbrake · <kbd>SHIFT</kbd> nitro (when installed)<br/>
+             <kbd>Q / E</kbd> shift down / up (manual) · <kbd>C</kbd> camera<br/>
+             <kbd>H</kbd> horn · <kbd>R</kbd> reset car</p>
+          <h3>WORLD</h3>
+          <p><kbd>M</kbd> map · <kbd>ESC</kbd> pause · <kbd>F</kbd> toggle photo-free camera</p>
+        </div>
+        <div>
+          <h3>MAKE MONEY</h3>
+          <p>Win street races at the glowing event markers, win drift battles in the industrial zone, run timed deliveries and enter car meets at the docks. Reputation unlocks the high-stakes events.</p>
+          <h3>GET FASTER</h3>
+          <p>Torque Lab (industrial east) and your home garage sell engine, gearbox, suspension, wheel, body and paint work. Every part changes the car visually and mechanically.</p>
+          <h3>KEEP THE HEAT DOWN</h3>
+          <p>Reckless driving raises your wanted level. Break line of sight and stay clear until the heat cools. Getting busted costs cash and impounds the car for a moment.</p>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button id="btn-credits-back" class="menu-btn primary small"><span class="mb-label">BACK</span></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ GARAGE ============ -->
+  <div id="garage" class="screen ui-screen hidden">
+    <div class="garage-head">
+      <div class="gh-left">
+        <div class="gh-title">YOUR GARAGE</div>
+        <div class="gh-sub" id="garage-address">1428 PALM AVE · SAN VELOR</div>
+      </div>
+      <div class="gh-right">
+        <div class="gh-stat"><span>CASH</span><b id="garage-money">$0</b></div>
+        <div class="gh-stat"><span>COLLECTION VALUE</span><b id="garage-value">$0</b></div>
+        <button id="btn-garage-close" class="icon-btn">✕</button>
+      </div>
+    </div>
+    <div class="garage-left panel-glass">
+      <div class="panel-title">FLEET <span id="garage-count" class="count">0</span></div>
+      <div id="garage-list" class="car-list"></div>
+      <div class="garage-hint">Click a car to inspect · double-click to drive</div>
+    </div>
+    <div class="garage-right panel-glass">
+      <div id="garage-car-name" class="car-title">—</div>
+      <div id="garage-car-class" class="car-class">—</div>
+      <div id="garage-stats" class="stat-bars"></div>
+      <div id="garage-specs" class="spec-grid"></div>
+      <div id="garage-mods" class="mod-summary"></div>
+      <div class="garage-actions">
+        <button id="btn-garage-drive" class="menu-btn primary small"><span class="mb-label">DRIVE</span></button>
+        <button id="btn-garage-tune" class="menu-btn small"><span class="mb-label">TUNE</span></button>
+        <button id="btn-garage-sell" class="menu-btn small danger"><span class="mb-label">SELL</span></button>
+      </div>
+      <div class="garage-view-hint">Drag to rotate · scroll to zoom</div>
+    </div>
+  </div>
+
+  <!-- ============ TUNING ============ -->
+  <div id="tuning" class="screen ui-screen hidden">
+    <div class="garage-head">
+      <div class="gh-left">
+        <div class="gh-title">TORQUE LAB <span class="lab-tag">CUSTOM SHOP</span></div>
+        <div class="gh-sub" id="tuning-sub">SELECT A CATEGORY</div>
+      </div>
+      <div class="gh-right">
+        <div class="gh-stat"><span>CASH</span><b id="tuning-money">$0</b></div>
+        <button id="btn-tuning-close" class="icon-btn">✕</button>
+      </div>
+    </div>
+    <div class="tuning-left panel-glass">
+      <div class="panel-title">CATEGORIES</div>
+      <div id="tuning-tabs" class="tuning-tabs"></div>
+      <div class="tuning-legend">
+        <div><span class="dot buy"></span>Owned</div>
+        <div><span class="dot price"></span>Price</div>
+        <div><span class="dot locked"></span>Locked</div>
+      </div>
+    </div>
+    <div class="tuning-right panel-glass">
+      <div class="panel-title" id="tuning-cat-title">ENGINE</div>
+      <div id="tuning-options" class="tuning-options"></div>
+      <div class="tuning-bottom">
+        <div id="tuning-compare" class="tuning-compare"></div>
+        <div class="tuning-detail">
+          <div id="tuning-part-name" class="part-name">—</div>
+          <div id="tuning-part-desc" class="part-desc">Select a part to see details.</div>
+          <div id="color-picker-row" class="color-picker-row"></div>
+          <div class="tuning-buy-row">
+            <div id="tuning-price" class="part-price">—</div>
+            <button id="btn-tuning-buy" class="menu-btn primary small" disabled><span class="mb-label">INSTALL</span></button>
+            <button id="btn-tuning-back" class="menu-btn small"><span class="mb-label">GARAGE</span></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ DEALERSHIP ============ -->
+  <div id="dealership" class="screen ui-screen hidden">
+    <div class="garage-head">
+      <div class="gh-left">
+        <div class="gh-title">VELOCITY MOTORS</div>
+        <div class="gh-sub">SAN VELOR AUTO ROW · EST. 1987</div>
+      </div>
+      <div class="gh-right">
+        <div class="gh-stat"><span>CASH</span><b id="dealer-money">$0</b></div>
+        <button id="btn-dealer-close" class="icon-btn">✕</button>
+      </div>
+    </div>
+    <div class="garage-left panel-glass">
+      <div class="panel-title">SHOWROOM</div>
+      <div id="dealer-list" class="car-list"></div>
+      <div class="garage-hint">Reputation unlocks premium stock</div>
+    </div>
+    <div class="garage-right panel-glass">
+      <div id="dealer-car-name" class="car-title">—</div>
+      <div id="dealer-car-class" class="car-class">—</div>
+      <div id="dealer-stats" class="stat-bars"></div>
+      <div id="dealer-specs" class="spec-grid"></div>
+      <div class="garage-actions">
+        <button id="btn-dealer-buy" class="menu-btn primary small"><span class="mb-label">BUY</span></button>
+      </div>
+      <div class="garage-view-hint">Drag to rotate · scroll to zoom</div>
+    </div>
+  </div>
+
+  <!-- ============ MAP ============ -->
+  <div id="map-screen" class="screen modal-screen hidden">
+    <div class="modal map-modal panel-metal">
+      <div class="map-head">
+        <h2>SAN VELOR</h2>
+        <div class="map-legend">
+          <span><i class="lg race"></i>Race events</span>
+          <span><i class="lg garage"></i>Garage</span>
+          <span><i class="lg shop"></i>Shop / dealer</span>
+          <span><i class="lg meet"></i>Car meet</span>
+          <span><i class="lg player"></i>You</span>
+        </div>
+      </div>
+      <canvas id="bigmap" width="900" height="900"></canvas>
+      <div class="modal-actions"><button id="btn-map-close" class="menu-btn primary small"><span class="mb-label">CLOSE</span></button></div>
+    </div>
+  </div>
+
+  <!-- ============ RACE RESULT ============ -->
+  <div id="results" class="screen modal-screen hidden">
+    <div class="modal results panel-metal">
+      <div id="result-rank" class="result-rank">2ND</div>
+      <h2 id="result-title">RACE COMPLETE</h2>
+      <div class="result-grid">
+        <div><span>TIME</span><b id="result-time">00:00.00</b></div>
+        <div><span>BEST LAP</span><b id="result-best">--:--</b></div>
+        <div><span>PAYOUT</span><b id="result-money" class="money">$0</b></div>
+        <div><span>REPUTATION</span><b id="result-rep">+0</b></div>
+      </div>
+      <div id="result-extra" class="result-extra"></div>
+      <div class="modal-actions">
+        <button id="btn-result-continue" class="menu-btn primary"><span class="mb-label">CONTINUE</span></button>
+        <button id="btn-result-retry" class="menu-btn"><span class="mb-label">RETRY</span></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ EVENT BRIEF ============ -->
+  <div id="brief" class="screen modal-screen hidden">
+    <div class="modal brief panel-metal">
+      <div class="brief-type" id="brief-type">SPRINT</div>
+      <h2 id="brief-name">EVENT NAME</h2>
+      <p id="brief-desc" class="brief-desc"></p>
+      <div class="result-grid">
+        <div><span>ROUTE</span><b id="brief-route">—</b></div>
+        <div><span>ENTRY FEE</span><b id="brief-fee">$0</b></div>
+        <div><span>PRIZE</span><b id="brief-prize" class="money">$0</b></div>
+        <div><span>REP REQUIRED</span><b id="brief-rep">0</b></div>
+      </div>
+      <div id="brief-extra" class="brief-extra"></div>
+      <div class="modal-actions">
+        <button id="btn-brief-start" class="menu-btn primary"><span class="mb-label">START EVENT</span></button>
+        <button id="btn-brief-back" class="menu-btn"><span class="mb-label">BACK</span></button>
+      </div>
+    </div>
+  </div>
+
+  <div id="fade" class="fade"></div>
+  <div id="boot-error" class="boot-error hidden"></div>
+</div>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
