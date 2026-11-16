@@ -5,26 +5,29 @@
   "type": "module",
   "description": "STREET EMPIRE - 3D open-world street racing game",
   "scripts": {
-    "start": "node scripts/check-node.mjs && vite --host 0.0.0.0 --port 5173",
-    "dev": "node scripts/check-node.mjs && vite --host 0.0.0.0 --port 5173",
-    "build": "node scripts/check-node.mjs && vite build",
-    "preview": "node scripts/check-node.mjs && vite preview --host 0.0.0.0 --port 4173",
+    "start": "node scripts/start.mjs",
+    "simple": "node scripts/start.mjs",
+    "dev": "vite --host 0.0.0.0 --port 5173",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 4173",
     "test": "node scripts/check-node.mjs && node test/run-tests.mjs",
     "test:integration": "node scripts/check-node.mjs && node test/integration.mjs",
     "test:map": "node scripts/check-node.mjs && node test/validate-map.mjs",
     "test:smoke": "node scripts/check-node.mjs && node test/smoke-dom.mjs",
-    "test:all": "node scripts/test-all.mjs"
+    "test:all": "node scripts/test-all.mjs",
+    "serve": "node scripts/start.mjs",
+    "test:page": "node scripts/check-node.mjs && node test/page-check.mjs"
   },
   "dependencies": {
     "three": "^0.187.0"
   },
-  "devDependencies": {
-    "vite": "^8.3.8"
-  },
   "engines": {
-    "node": "^20.19.0 || >=22.12.0"
+    "node": ">=18.0.0"
   },
   "browserslist": [
     "defaults and supports es6-module"
-  ]
+  ],
+  "optionalDependencies": {
+    "vite": "^8.3.8"
+  }
 }

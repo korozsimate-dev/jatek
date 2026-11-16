@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>STREET EMPIRE — San Velor</title>
 <meta name="description" content="STREET EMPIRE — a 3D open-world street racing game set in San Velor." />
-<link rel="stylesheet" href="/src/ui/styles.css" />
+<link rel="stylesheet" href="./src/ui/styles.css" />
 </head>
 <body>
 <div id="app">
@@ -411,6 +411,81 @@
   <div id="fade" class="fade"></div>
   <div id="boot-error" class="boot-error hidden"></div>
 </div>
-<script type="module" src="/src/main.js"></script>
+<script>
+// ---- boot watchdog -------------------------------------------------------
+// Runs before the app module. If the module never starts (bad Node version,
+// missing node_modules, a blocked module request, no WebGL2), the user sees a
+// readable message on the page instead of a silent black screen.
+window.__BOOT_OK__ = false;
+(function () {
+  function show(title, detail, hint) {
+    var el = document.getElementById('boot-error');
+    if (!el) return;
+    el.classList.remove('hidden');
+    el.innerHTML = '';
+    var h = document.createElement('div');
+    h.className = 'boot-error-title';
+    h.textContent = title;
+    el.appendChild(h);
+    var d = document.createElement('pre');
+    d.className = 'boot-error-detail';
+    d.textContent = detail || '';
+    el.appendChild(d);
+    if (hint) {
+      var t = document.createElement('div');
+      t.className = 'boot-error-hint';
+      t.textContent = hint;
+      el.appendChild(t);
+    }
+    var loading = document.getElementById('loading');
+    if (loading) loading.classList.add('hidden');
+  }
+  window.__BOOT_FAIL__ = show;
+
+  window.addEventListener('error', function (e) {
+    if (window.__BOOT_OK__) return;
+    var msg = e && e.message ? e.message : 'unknown error';
+    show('STREET EMPIRE could not start', msg,
+      location.protocol === 'file:'
+        ? 'You opened the file directly. Start the game with:  npm start'
+        : 'Check the browser console for the full error.');
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    if (window.__BOOT_OK__) return;
+    var r = e && e.reason;
+    show('STREET EMPIRE could not start', (r && (r.stack || r.message)) || String(r),
+      'Check the browser console for the full error.');
+  });
+
+  // no WebGL2? say so plainly
+  try {
+    var probe = document.createElement('canvas');
+    var gl = probe.getContext('webgl2');
+    if (!gl) {
+      show('WebGL2 is not available',
+        'This game needs WebGL2 (hardware accelerated 3D in the browser).',
+        'Enable hardware acceleration in your browser settings, update your graphics driver, then reload. In Chrome: chrome://gpu');
+      window.__NO_WEBGL__ = true;
+      return;
+    }
+  } catch (err) { /* the app reports its own errors */ }
+
+  // the module is loaded from disk or a server; file:// cannot use ES modules
+  if (location.protocol === 'file:') {
+    show('Serve the game, do not open the file directly',
+      'ES modules and textures cannot load from file:// URLs.',
+      'In the project folder run:  npm start   — then open http://localhost:5173');
+    return;
+  }
+
+  setTimeout(function () {
+    if (window.__BOOT_OK__) return;
+    show('The game did not start',
+      'The page loaded but the game module never ran.',
+      'Most likely node_modules is missing. In the project folder run:  npm install   then:  npm start');
+  }, 12000);
+})();
+</script>
+<script type="module" src="./src/main.js"></script>
 </body>
 </html>

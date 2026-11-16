@@ -7,8 +7,10 @@ export default defineConfig({
   base: './',
   server: {
     host: '0.0.0.0',
-    port: 5173,
-    strictPort: true,
+    port: Number(process.env.PORT) || 5173,
+    // not strict: if the port is busy Vite picks the next free one instead of
+    // refusing to start (it prints the URL it actually used)
+    strictPort: false,
     allowedHosts: true,
     cors: true,
   },

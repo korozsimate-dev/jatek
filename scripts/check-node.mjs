@@ -1,9 +1,11 @@
 // Preflight check: fail with a readable message instead of a cryptic Vite error
 // when the installed Node version is too old for this toolchain.
-export const REQUIRED = '^20.19.0 || >=22.12.0';
+// The bundled static server only needs Node 18; Vite (optional, for the fast
+// dev server) needs 20.19+. We therefore only hard-fail on really old Node.
+export const REQUIRED = '>=18.0.0';
 
 const [major, minor] = process.versions.node.split('.').map(Number);
-const ok = (major === 20 && minor >= 19) || major > 20;
+const ok = major >= 18;
 
 if (!ok) {
   console.error(`
@@ -11,9 +13,6 @@ if (!ok) {
 
   Required: Node ${REQUIRED}
   Found:    Node ${process.versions.node}
-
-  Vite 8 (the dev server this project uses) refuses to run on older versions,
-  which is why the startup fails with an unclear error.
 
   Fix: install a current LTS release from https://nodejs.org
        or, with nvm:  nvm install --lts && nvm use --lts

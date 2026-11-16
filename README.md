@@ -10,32 +10,65 @@ Everything is generated in code: no external assets, no downloads, no server.
 
 ## Run it
 
-You need **Node.js 20.19+ or 22.12+** (Vite 8's requirement; tested on 22) and a
-browser with WebGL2.
+You need **Node.js 18 or newer** (tested on 22) and a browser with WebGL2
+(Chrome, Edge, Firefox, Safari 15+). Vite's dev server additionally needs
+20.19+/22.12+, but `npm start` does not.
 
 ```bash
 git clone https://github.com/korozsimate-dev/jatek.git
 cd jatek
-git checkout arena/49d4465d-jatek
 npm install
-npm start          # or: npm run dev
+npm start
 ```
 
-If your Node is too old, the startup stops immediately with a clear message
-telling you which version you need instead of failing inside Vite.
+`npm start` runs a small bundled static server (`server.mjs`) that needs **no
+build step and no bundler** — its only install-time dependency is `three` — and
+it opens the browser for you.
 
-Then open **http://localhost:5173** in Chrome, Edge or Firefox. The first load
-takes a moment while the city, cars and textures are generated (there is a
-progress bar).
+What it prints on a healthy machine:
 
-If port 5173 is taken, Vite stops with `Port 5173 is already in use`. Either
-close whatever is on that port, or run it elsewhere:
+```
+  STREET EMPIRE — SAN VELOR
+  running at http://localhost:5173/
+  (press Ctrl+C to stop)
+
+  Self-check: module graph OK.
+```
+
+Open the URL it prints in Chrome, Edge or Firefox. The first load takes a moment
+while the city, cars and textures are generated — there is a progress bar.
+
+### If it does not run
+
+The startup output now names the problem, and so does the page itself.
+
+| What you see | What it means | Fix |
+| --- | --- | --- |
+| `Port 5173 is already in use` | a server from an earlier attempt is still running | nothing — it moves to **5174** (and so on) by itself and prints the new URL |
+| `This copy has N problem(s)` | `server.mjs` checks the module graph before serving | the bullet list names the file and the import to fix |
+| `Three.js is not installed yet` | `node_modules` is missing | `npm install` |
+| `Node 16 … cannot start` | too old | install Node 18+ from [nodejs.org](https://nodejs.org) |
+| Page: *"The game did not start"* | server is up but the module never ran | `npm install`, then hard-reload with **Ctrl+F5** |
+| Page: *"WebGL2 is not available"* | hardware acceleration off / driver | enable it, then check `chrome://gpu` |
+| Page: *"Serve the game, do not open the file directly"* | opened a `file://` URL | use `npm start`, or open `dist/index.html` after `npm run build` |
+| Anything else | the page shows the thrown error and stack in a red panel | that text is the bug report — it is worth pasting into an issue |
+
+Two things that are *not* bugs: the very first load is a few seconds of
+generation, and audio only starts after your first click (browser policy — the
+menu click does it).
+
+### Ports and options
 
 ```bash
-npx vite --port 5200
+node server.mjs                 # 5173 (or the next free port)
+node server.mjs --port 5200     # explicit port
+node server.mjs --no-open       # do not launch a browser
+node server.mjs --help
 ```
 
-and open `http://localhost:5200`.
+Use `npm run dev` if you want the Vite dev server (hot reload). Vite is an
+optional dependency: if `npm install` could not fetch it, `npm run dev` fails but
+`npm start` still works.
 
 ### Play without a dev server
 
@@ -64,12 +97,14 @@ Other scripts:
 
 | Command | What it does |
 | --- | --- |
-| `npm run dev` | Dev server on port 5173 |
+| `npm start` | Static server, no bundler needed (recommended) |
+| `node server.mjs --port 5200` | Same server on another port |
+| `npm run dev` | Vite dev server with hot reload on port 5173 |
 | `npm run build` | Production build into `dist/` |
 | `npm run preview` | Serve the built game on port 4173 |
-| `npm start` | Same as `npm run dev` |
 | `npm test` | Unit suite |
-| `npm run test:all` | All four suites in sequence |
+| `npm run test:all` | All five suites in sequence |
+| `node test/page-check.mjs` | Page + module graph + static server checks |
 | `node test/integration.mjs` | End-to-end headless playthrough of the real `Game` |
 | `node test/validate-map.mjs` | Guarantees every venue, checkpoint and road is reachable |
 | `node test/smoke-dom.mjs` | Boots the real app against a stub DOM (catches wiring errors) |

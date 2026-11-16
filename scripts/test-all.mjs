@@ -6,6 +6,7 @@ const suites = [
   ['integration', 'test/integration.mjs'],
   ['map', 'test/validate-map.mjs'],
   ['smoke', 'test/smoke-dom.mjs'],
+  ['page', 'test/page-check.mjs'],
 ];
 
 let failed = 0;

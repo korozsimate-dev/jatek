@@ -1,7 +1,9 @@
 // ============================================================
 // STREET EMPIRE — entry point
 // ============================================================
-import './ui/styles.css';
+// NOTE: the stylesheet is linked from index.html, not imported here. Importing
+// CSS from an ES module only works under a bundler, and would break the
+// dependency-free server (the page would load with no styles and no game).
 import { Game } from './game/game.js';
 
 const $ = (id) => document.getElementById(id);
@@ -15,11 +17,17 @@ function setLoad(pct, text) {
 
 function fatal(err) {
   console.error(err);
+  window.__BOOT_OK__ = false;
+  const detail = err && (err.stack || err.message) ? (err.stack || err.message) : String(err);
+  if (typeof window.__BOOT_FAIL__ === 'function') {
+    window.__BOOT_FAIL__('STREET EMPIRE failed to start', detail,
+      'Try a modern browser (Chrome / Edge / Firefox) with WebGL2 and hardware acceleration enabled.');
+    return;
+  }
   const el = $('boot-error');
   if (el) {
     el.classList.remove('hidden');
-    el.textContent = 'STREET EMPIRE failed to start.\n\n' + (err && err.stack ? err.stack : String(err)) +
-      '\n\nTry a modern browser (Chrome / Edge / Firefox) with WebGL2 enabled.';
+    el.textContent = 'STREET EMPIRE failed to start.\n\n' + detail;
   }
 }
 
@@ -36,6 +44,7 @@ async function boot() {
     };
     await game.boot(setLoad);
     game.start();
+    window.__BOOT_OK__ = true;
     setLoad(100, 'READY');
     setTimeout(() => {
       $('loading').classList.add('hidden');
