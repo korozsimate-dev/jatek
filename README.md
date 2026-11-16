@@ -10,15 +10,19 @@ Everything is generated in code: no external assets, no downloads, no server.
 
 ## Run it
 
-You need **Node.js 18 or newer** (tested on 22) and a browser with WebGL2.
+You need **Node.js 20.19+ or 22.12+** (Vite 8's requirement; tested on 22) and a
+browser with WebGL2.
 
 ```bash
 git clone https://github.com/korozsimate-dev/jatek.git
 cd jatek
 git checkout arena/49d4465d-jatek
 npm install
-npm run dev
+npm start          # or: npm run dev
 ```
+
+If your Node is too old, the startup stops immediately with a clear message
+telling you which version you need instead of failing inside Vite.
 
 Then open **http://localhost:5173** in Chrome, Edge or Firefox. The first load
 takes a moment while the city, cars and textures are generated (there is a
@@ -63,7 +67,9 @@ Other scripts:
 | `npm run dev` | Dev server on port 5173 |
 | `npm run build` | Production build into `dist/` |
 | `npm run preview` | Serve the built game on port 4173 |
+| `npm start` | Same as `npm run dev` |
 | `npm test` | Unit suite |
+| `npm run test:all` | All four suites in sequence |
 | `node test/integration.mjs` | End-to-end headless playthrough of the real `Game` |
 | `node test/validate-map.mjs` | Guarantees every venue, checkpoint and road is reachable |
 | `node test/smoke-dom.mjs` | Boots the real app against a stub DOM (catches wiring errors) |
