@@ -10,13 +10,51 @@ Everything is generated in code: no external assets, no downloads, no server.
 
 ## Run it
 
+You need **Node.js 18 or newer** (tested on 22) and a browser with WebGL2.
+
 ```bash
+git clone https://github.com/korozsimate-dev/jatek.git
+cd jatek
+git checkout arena/49d4465d-jatek
 npm install
 npm run dev
 ```
 
-Then open **http://localhost:5173**. (Vite binds to `0.0.0.0` so it also works
-through a proxied preview URL.)
+Then open **http://localhost:5173** in Chrome, Edge or Firefox. The first load
+takes a moment while the city, cars and textures are generated (there is a
+progress bar).
+
+If port 5173 is taken, Vite stops with `Port 5173 is already in use`. Either
+close whatever is on that port, or run it elsewhere:
+
+```bash
+npx vite --port 5200
+```
+
+and open `http://localhost:5200`.
+
+### Play without a dev server
+
+```bash
+npm run build      # writes dist/
+```
+
+`dist/` is fully self-contained and uses relative paths, so you can also just
+double-click `dist/index.html` and play from disk. To serve it over HTTP
+instead:
+
+```bash
+npm run preview    # http://localhost:4173
+```
+
+### Troubleshooting
+
+* **Black screen / "failed to start"** — the browser has no WebGL2. Check
+  `chrome://gpu` or enable hardware acceleration.
+* **No sound** — browsers only allow audio after a click; click once on the
+  page (the menu does this for you).
+* **Mouse look doesn't work** — click the canvas to capture the pointer,
+  `Esc` releases it.
 
 Other scripts:
 
