@@ -372,8 +372,8 @@ export class Game {
     if (!fresh && savedPos && isFinite(savedPos.x) && isFinite(savedPos.z)) {
       sp = { x: savedPos.x, z: savedPos.z, heading: savedPos.h ?? 0 };
     }
-    // place the player beside the car, not inside it
-    this.player.place(sp.x + 2.6, sp.z + 2.0, -Math.PI * 0.5);
+    // stand beside the driver's door, facing the same way as the car
+    this.player.place(sp.x + Math.sin(sp.heading) * 2.3, sp.z + Math.cos(sp.heading) * 2.3, sp.heading);
     this.setupPlayerVehicle(def, car.mods, car.uid, sp.x, sp.z, sp.heading);
     const startInCar = !!(savedPos && savedPos.inCar);
     this.playerInCar = false;
@@ -605,11 +605,13 @@ export class Game {
     if (Math.abs(v.longSpeed) > 4) { this.hud.toast('SLOW DOWN TO EXIT', 'warn'); return; }
     this.playerInCar = false;
     const side = 2.2;
+    // step out on the driver's side (the car's right) and face the way it does
     this.player.place(
       v.x + Math.sin(v.heading) * side,
       v.z + Math.cos(v.heading) * side,
       v.heading
     );
+    this.cameraRig.yaw = v.heading + Math.PI;   // camera stays behind the player
     this.player.setVisible(true);
     this.audio.stopEngine();
     this.audio.updateSkid(0, 0);

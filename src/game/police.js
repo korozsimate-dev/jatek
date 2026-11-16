@@ -279,7 +279,8 @@ export class PoliceSystem {
     const desired = Math.atan2(-(tz - v.z), tx - v.x);
     let diff = wrapAngle(desired - v.heading);
     // avoid running into walls: nudge if blocked
-    const steer = clamp(diff * 2.2, -1, 1);
+    // steer > 0 = right (controller convention), +diff means pointing left
+    const steer = clamp(-diff * 2.2, -1, 1);
     const speed = v.speedKmh;
     let want = dist > 80 ? 100 : dist > 30 ? 78 : 52;
     want *= 1 + this.wanted * 0.07;

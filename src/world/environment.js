@@ -123,8 +123,10 @@ export class Environment {
     this.scene.add(this.sun);
     this.scene.add(this.sun.target);
 
-    this.moon = new THREE.DirectionalLight('#8ea8d8', 0.0);
+    this.moon = new THREE.DirectionalLight('#a8c0e8', 0.0);
+    this.moon.castShadow = false;   // shadow budget stays with the sun
     this.scene.add(this.moon);
+    this.scene.add(this.moon.target);
 
     // subtle ambient bounce tinted by the city glow
     this.ambient = new THREE.AmbientLight('#1a2230', 0.55);
@@ -244,7 +246,8 @@ export class Environment {
     this.sun.intensity = sunStrength * 2.9;
     this.sun.color.set('#ffe9c4').lerp(new THREE.Color('#ff9150'), duskAmt * 0.75);
     this.sun.visible = sunStrength > 0.01;
-    this.moon.intensity = nightAmt * 0.34;
+    // the moon is the key light at night — without it everything is a silhouette
+    this.moon.intensity = nightAmt * 1.05;
     this.moon.visible = nightAmt > 0.02;
     const camPos = camera ? camera.position : new THREE.Vector3();
     this.sun.position.set(camPos.x + sunDir.x * 240, sunDir.y * 240, camPos.z + sunDir.z * 240);
@@ -252,11 +255,13 @@ export class Environment {
     this.moon.position.set(camPos.x + moonDir.x * 200, Math.abs(moonDir.y) * 200 + 40, camPos.z + moonDir.z * 200);
     this.moon.target = this.sun.target;
 
-    this.hemi.intensity = 0.18 + dayAmt * 0.55;
-    this.hemi.color.set('#9ac0e8').lerp(new THREE.Color('#2c3444'), nightAmt);
-    this.hemi.groundColor.set('#4a4238').lerp(new THREE.Color('#14161a'), nightAmt);
-    this.ambient.intensity = 0.22 + nightAmt * 0.34;
-    this.ambient.color.set('#1c2734').lerp(new THREE.Color('#2a2230'), nightAmt);
+    // Night must stay *playable*: a sodium/orange sky bounce plus a cool fill
+    // keeps shapes readable even far from a street lamp.
+    this.hemi.intensity = 0.34 + dayAmt * 0.52;
+    this.hemi.color.set('#9ac0e8').lerp(new THREE.Color('#4a5872'), nightAmt);
+    this.hemi.groundColor.set('#4a4238').lerp(new THREE.Color('#2a2622'), nightAmt);
+    this.ambient.intensity = 0.34 + nightAmt * 0.52;
+    this.ambient.color.set('#1c2734').lerp(new THREE.Color('#3a3542'), nightAmt);
 
     // fog
     const quality = this.settings.get('quality');

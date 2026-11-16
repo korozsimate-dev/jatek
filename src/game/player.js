@@ -62,7 +62,7 @@ export class Player {
     // hair
     head.add(mkBox(0.26, 0.10, 0.26, jacketMat, 0, 0.25, 0));
     // sunglasses
-    head.add(mkBox(0.25, 0.05, 0.03, shoeMat, 0, 0.14, 0.12));
+    head.add(mkBox(0.03, 0.05, 0.25, shoeMat, 0.12, 0.14, 0));
     torso.add(head);
     // arms
     const mkArm = (sgn) => {
@@ -88,7 +88,8 @@ export class Player {
       pivot.add(thigh);
       const shin = new THREE.Group(); shin.position.y = -0.44;
       shin.add(mkBox(0.145, 0.42, 0.16, pantsMat, 0, -0.21, 0));
-      const foot = mkBox(0.16, 0.11, 0.30, shoeMat, 0, -0.46, 0.07);
+      // toes point along +X: that is the direction the rig walks in
+      const foot = mkBox(0.30, 0.11, 0.16, shoeMat, 0.07, -0.46, 0);
       shin.add(foot);
       pivot.add(shin);
       return { pivot, shin };
@@ -101,6 +102,11 @@ export class Player {
     this.torso = torso;
     this.headGroup = head;
     this.rig.add(hips);
+  }
+
+  // World-space heading for a direction vector: the rig faces (cos h, -sin h).
+  static headingFor(dx, dz) {
+    return Math.atan2(-dz, dx);
   }
 
   place(x, z, heading) {
@@ -130,7 +136,7 @@ export class Player {
     const targetSpeed = moving ? maxSpeed : 0;
     this.speed += (targetSpeed - this.speed) * Math.min(1, dt * 10);
     if (moving) {
-      const targetHeading = Math.atan2(-mz, mx);
+      const targetHeading = Player.headingFor(mx, mz);
       let d = targetHeading - this.heading;
       while (d > Math.PI) d -= Math.PI * 2;
       while (d < -Math.PI) d += Math.PI * 2;
@@ -158,12 +164,14 @@ export class Player {
     const amp = Math.min(1, this.speed / 2.2) * (0.35 + this.anim.run * 0.65);
     const s = Math.sin(this.anim.phase * 2);
     const s2 = Math.sin(this.anim.phase * 2 + Math.PI);
-    this.legL.pivot.rotation.z = s * 0.72 * amp;
-    this.legR.pivot.rotation.z = s2 * 0.72 * amp;
-    this.legL.shin.rotation.z = Math.max(0, -s) * 0.9 * amp;
-    this.legR.shin.rotation.z = Math.max(0, -s2) * 0.9 * amp;
-    this.armL.rotation.z = s2 * 0.60 * amp;
-    this.armR.rotation.z = s * 0.60 * amp;
+    // limbs swing about Z, which is the axis that moves them along the walking
+    // direction (X). A rotation around X would splay the legs sideways.
+    this.legL.pivot.rotation.z = -s * 0.72 * amp;
+    this.legR.pivot.rotation.z = -s2 * 0.72 * amp;
+    this.legL.shin.rotation.z = -Math.max(0, -s) * 0.9 * amp;
+    this.legR.shin.rotation.z = -Math.max(0, -s2) * 0.9 * amp;
+    this.armL.rotation.z = -s2 * 0.60 * amp;
+    this.armR.rotation.z = -s * 0.60 * amp;
     this.torso.rotation.z = -s * 0.06 * amp;
     this.hips.position.y = 0.92 + Math.abs(Math.sin(this.anim.phase * 2)) * 0.035 * amp;
     // idle breathing

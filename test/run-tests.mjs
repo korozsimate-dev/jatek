@@ -219,7 +219,7 @@ for (const d of CAR_DEFS) {
   ok(!!visual.bodyMat, `${d.id} has a paint material`);
   visual.update(1 / 60, { steer: 0.4, wheelDelta: 0.1, suspension: [0, 0, 0, 0] });
   ok(visual.wheels[0].grp.rotation.y !== 0, `${d.id} front wheels steer`);
-  ok(visual.wheels[0].spin.rotation.x !== 0, `${d.id} wheels spin`);
+  ok(visual.wheels[0].spin.rotation.z !== 0, `${d.id} wheels spin`);
   visual.setBrake(1); visual.setReverse(1); visual.setLights(true);
   ok(visual.tailMat.emissiveIntensity > 1, `${d.id} brake lights brighten`);
   // every part variant must rebuild without throwing

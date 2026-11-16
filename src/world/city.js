@@ -4,7 +4,8 @@
 // ============================================================
 import * as THREE from 'three';
 import { CONFIG } from '../config.js';
-import { RNG, SpatialGrid } from '../core/util.js';
+import { RNG, SpatialGrid, clamp } from '../core/util.js';
+const clamp01 = (v) => clamp(v, 0, 1);
 import { GRID, ROAD_HW, PAD, PAD_H, RING, RING_HW, BOUND, CANYON_GATE, blockCenters, districtOf, POIS, LOTS, GAS_STATIONS, canyonRoad } from './layout.js';
 const BOUND_X = 560;
 const BOUND_Z = 540;
@@ -906,11 +907,11 @@ export class City {
   }
 
   _floodLights() {
-    // a small pool of point lights near the player, recycled as they move
+    // a pool of point lights near the player, recycled as they move
     this.lampLights = [];
-    const n = 6;
+    const n = 14;
     for (let i = 0; i < n; i++) {
-      const l = new THREE.PointLight('#ffcf8a', 0, 34, 2);
+      const l = new THREE.PointLight('#ffcf8a', 0, 40, 1.7);
       l.visible = false;
       this.scene.add(l);
       this.lampLights.push(l);
@@ -969,6 +970,20 @@ export class City {
   // dynamic light recycling for street lamps
   updateLights(night, camera, qualityLampCount = 4) {
     if (!this.lampLights) return;
+    // windows light up after dusk (the emissive maps are baked per facade)
+    const glow = clamp01((night - 0.12) / 0.6);
+    if (this._facadeGlow !== glow) {
+      this._facadeGlow = glow;
+      const facades = MATS.facades || {};
+      for (const k in facades) {
+        facades[k].emissiveIntensity = glow * 1.35;
+        facades[k].needsUpdate = false;
+      }
+      if (MATS.lampHead) MATS.lampHead.emissiveIntensity = 0.5 + glow * 1.6;
+      for (const m of [MATS.tlRed, MATS.tlGreen, MATS.tlAmber]) {
+        if (m) m.emissiveIntensity = 0.55 + glow * 1.1;
+      }
+    }
     const camX = camera.position.x, camZ = camera.position.z;
     if (night < 0.35) {
       for (const l of this.lampLights) l.visible = false;
@@ -994,8 +1009,8 @@ export class City {
       const src = this._lampSorted[i];
       if (src && i < n) {
         light.position.set(src.x, src.y || 6.8, src.z);
-        light.intensity = night * 2.2;
-        light.distance = 30;
+        light.intensity = night * 6.5;
+        light.distance = 40;
         light.visible = true;
       } else {
         light.visible = false;

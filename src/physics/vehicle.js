@@ -125,7 +125,10 @@ export class Vehicle {
     // --- steering: speed sensitive, smoothed ---
     const speedFactor = 1 / (1 + Math.abs(vLong) * 0.045);
     const maxSteerNow = 0.58 * speedFactor + 0.07;
-    const steerTarget = steerIn * maxSteerNow * (this.assists ? 1 : 1.12);
+    // Sign convention: +steerAngle turns the car LEFT, because heading grows
+    // counter-clockwise on the X/Z plane (forward = (cos h, -sin h)).
+    // steerIn is +1 for "right" (D), so it is negated here.
+    const steerTarget = -steerIn * maxSteerNow * (this.assists ? 1 : 1.12);
     const steerRate = 8.5 + (1 - speedFactor) * 7;
     this.steerAngle += clamp(steerTarget - this.steerAngle, -steerRate * dt, steerRate * dt);
 

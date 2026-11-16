@@ -60,7 +60,7 @@ function chunk(type, data) {
   crcBuf.writeUInt32BE(crc32(Buffer.concat([t, data])));
   return Buffer.concat([len, t, data, crcBuf]);
 }
-function writePNG(file, w, h, rgb) {
+export function writePNG(file, w, h, rgb) {
   const sig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4);
@@ -76,7 +76,7 @@ function writePNG(file, w, h, rgb) {
 }
 
 // ---------- rasteriser ----------
-class Raster {
+export class Raster {
   constructor(w, h) {
     this.w = w; this.h = h;
     this.color = Buffer.alloc(w * h * 3);
@@ -126,7 +126,7 @@ class Raster {
 }
 
 // ---------- mesh collection ----------
-function collectMeshes(root, out = []) {
+export function collectMeshes(root, out = []) {
   root.updateMatrixWorld(true);
   root.traverse((o) => {
     if (!o.isMesh || !o.visible) return;
@@ -146,7 +146,7 @@ function collectMeshes(root, out = []) {
   return out;
 }
 
-function renderObjects(meshes, camera, w, h, opts = {}) {
+export function renderObjects(meshes, camera, w, h, opts = {}) {
   const raster = new Raster(w, h);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
@@ -297,6 +297,8 @@ async function cockpitScene() {
   return { scene, camera, meshes: collectMeshes(scene) };
 }
 
+// Only run the CLI when invoked directly (inspect.mjs imports the helpers).
+if (process.argv[1] && !process.argv[1].endsWith('preview.mjs')) { /* imported */ } else {
 const mode = process.argv[2] || 'car';
 const scenes = { car: carScene, grid: gridScene, city: cityScene, rear: cockpitScene };
 const fn = scenes[mode] || carScene;
@@ -308,3 +310,4 @@ const raster = renderObjects(meshes, camera, W, H, { debug: !!process.env.DBG })
 const out = `out/${mode}.png`;
 writePNG(out, W, H, raster.buffer);
 console.log(`rendered ${meshes.length} mesh groups, ${W}x${H} -> ${out} in ${Date.now() - t0}ms`);
+}

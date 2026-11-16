@@ -9,11 +9,10 @@ import * as THREE from 'three';
 import { PARTS } from '../data/cars.js';
 import { clamp } from '../core/util.js';
 
-const CIRC = 16; // cross-section resolution
 
 // ---------- material helpers ----------
+// Procedural sky/ground studio environment used for paint reflections.
 export function makeEnv(renderer, scene) {
-  // procedural sky/ground environment used for paint reflections
   const pmrem = new THREE.PMREMGenerator(renderer);
   const envScene = new THREE.Scene();
   const geo = new THREE.SphereGeometry(50, 32, 16);
@@ -43,227 +42,144 @@ export function makeEnv(renderer, scene) {
   return rt.texture;
 }
 
-// ---------- lofted body ----------
-// A "dome" section: flat at y0, rounded above — used for the greenhouse so the
-// glass never bulges out below the belt line.
-function superellipse(hw, y0, y1, n, topNarrow, out, base, dome = false, edgeLift = 0) {
-  if (dome) {
-    for (let i = 0; i < CIRC; i++) {
-      const t = (i / CIRC) * Math.PI * 2;
-      const ct = Math.cos(t), st = Math.sin(t);
-      const e = 2 / n;
-      let z = Math.sign(ct) * Math.pow(Math.abs(ct), e) * hw;
-      const up = Math.max(0, st);
-      let y = y0 + Math.pow(up, e) * (y1 - y0);
-      const tn = topNarrow * up * up;
-      z *= 1 - tn;
-      // lift the outer edges (fender crowning over the hood/trunk)
-      if (edgeLift) y += edgeLift * Math.pow(Math.abs(z) / Math.max(0.001, hw), 2) * up;
-      out[base + i * 3] = z;
-      out[base + i * 3 + 1] = y;
-    }
-    return;
+// ---------- body surfaces ------------------------------------------------
+// The body is lofted from closed cross-sections along X. A section is built
+// from three pieces per side so the flank has real vertical resolution (needed
+// for the wheel arches to be cut cleanly):
+//
+//   floor corner -> rocker/flank (nearly vertical) -> shoulder
+//     -> crowned top (quarter superellipse) -> mirror down the other side
+//
+// Ring index 0 is the floor corner on +Z; the ring closes along the flat floor.
+
+const FLANK = 6;      // rows between the floor and the shoulder
+const CROWN = 9;      // rows from the shoulder to the roof centre
+const RING = (FLANK + 1 + CROWN) * 2 - 1;   // 31: floor corner both sides
+
+function sectionRing(sec, out) {
+  const { hw, yBot, yTop } = sec;
+  const yShoulder = sec.shoulderY ?? yBot + (yTop - yBot) * 0.62;
+  const tuck = sec.tuck ?? 0.11;          // bottom edge pulled inboard
+  const nz = sec.nz ?? 5.5;               // horizontal roundness of the roof
+  const ny = sec.ny ?? 2.6;               // vertical roundness of the roof
+  const zBot = hw * (1 - tuck);
+  const crown = sec.topCrown ?? 0;
+  let i = 0;
+  const put = (z, y) => { out[i * 2] = z; out[i * 2 + 1] = y; i++; };
+
+  // ---- +Z side, bottom to roof centre ----
+  const half = [];
+  for (let k = 0; k <= FLANK; k++) {
+    const t = k / FLANK;
+    const e = t * t * (3 - 2 * t);                 // smoothstep
+    const z = zBot + (hw - zBot) * e;
+    const y = yBot + (yShoulder - yBot) * e;
+    half.push([z, y]);
   }
-  const cy = (y0 + y1) * 0.5;
-  const ry = (y1 - y0) * 0.5;
-  for (let i = 0; i < CIRC; i++) {
-    const t = (i / CIRC) * Math.PI * 2;
-    const ct = Math.cos(t), st = Math.sin(t);
-    const e = 2 / n;
-    let z = Math.sign(ct) * Math.pow(Math.abs(ct), e) * hw;
-    let y = cy + Math.sign(st) * Math.pow(Math.abs(st), e) * ry;
-    if (st > 0) z *= 1 - topNarrow * st * st;
-    out[base + i * 3] = z;
-    out[base + i * 3 + 1] = y;
+  for (let k = 1; k <= CROWN; k++) {
+    const t = k / CROWN;
+    const a = t * Math.PI / 2;
+    const z = hw * Math.pow(Math.cos(a), 2 / nz);
+    const y = yShoulder + (yTop - yShoulder) * Math.pow(Math.sin(a), 2 / ny);
+    half.push([z, y]);
   }
+  // half runs from the floor corner up to (0, yTop)
+  for (const [z, y] of half) put(z, y + crown * (1 - Math.pow(Math.abs(z) / Math.max(0.01, hw), 2)));
+  // ---- mirror down the -Z side, skipping the shared roof vertex ----
+  for (let k = half.length - 2; k >= 0; k--) {
+    const [z, y] = half[k];
+    put(-z, y + crown * (1 - Math.pow(Math.abs(z) / Math.max(0.01, hw), 2)));
+  }
+  return RING;
 }
 
-function loft(sections, opts = {}) {
-  // sections: [{x, hw, y0, y1, n, topNarrow}]
+function loftBody(sections, def) {
   const S = sections.length;
-  const verts = new Float32Array(S * CIRC * 3);
-  for (let s = 0; s < S; s++) {
-    const sec = sections[s];
-    const arr = [];
-    superellipse(sec.hw, sec.y0, sec.y1, sec.n ?? 3.2, sec.topNarrow ?? 0.1, arr, 0, sec.dome, sec.edgeLift ?? 0);
-    for (let i = 0; i < CIRC; i++) {
-      const vi = s * CIRC + i;
-      verts[vi * 3] = sec.x;
-      verts[vi * 3 + 1] = arr[i * 3 + 1];
-      verts[vi * 3 + 2] = arr[i * 3];
-    }
-  }
+  sectionRing(sections[0], new Float32Array(RING * 2));   // warm-up / validation
+  const rings = sections.map((sec) => {
+    const arr = new Float32Array(RING * 2);
+    sectionRing(sec, arr);
+    return arr;
+  });
+  const pos = [];
   const idx = [];
+  const push = (x, y, z) => { pos.push(x, y, z); return pos.length / 3 - 1; };
+  const map = [];
+  for (let s = 0; s < S; s++) {
+    const row = [];
+    for (let i = 0; i < RING; i++) row.push(push(sections[s].x, rings[s][i * 2 + 1], rings[s][i * 2]));
+    map.push(row);
+  }
+
+  const B = def.body;
+  const archR = B.wheelR * 1.10;
+  const axleF = B.wheelbase / 2, axleR = -B.wheelbase / 2;
+  const archCentreY = B.wheelR;
+  // is the quad between these two sections and ring rows inside a wheel arch?
+  const inArch = (xc, y, z) => {
+    if (Math.abs(z) < 0.55 * (B.width / 2)) return false;      // only the flanks
+    for (const ax of [axleF, axleR]) {
+      const dx = xc - ax, dy = y - archCentreY;
+      if (dx * dx + dy * dy < archR * archR) return true;
+    }
+    return false;
+  };
+
   for (let s = 0; s < S - 1; s++) {
-    for (let i = 0; i < CIRC; i++) {
-      const a = s * CIRC + i;
-      const b = s * CIRC + ((i + 1) % CIRC);
-      const c = (s + 1) * CIRC + i;
-      const d = (s + 1) * CIRC + ((i + 1) % CIRC);
+    const xc = (sections[s].x + sections[s + 1].x) / 2;
+    for (let i = 0; i < RING - 1; i++) {
+      const y = (rings[s][i * 2 + 1] + rings[s][i * 2 + 3]) / 2;
+      const z = (rings[s][i * 2] + rings[s][i * 2 + 2]) / 2;
+      if (inArch(xc, y, z)) continue;      // leave the wheel arch open
+      const a = map[s][i], b = map[s][i + 1];
+      const c = map[s + 1][i], d = map[s + 1][i + 1];
+      // last ring row wraps back to the floor corner of the other side
       idx.push(a, c, b, b, c, d);
     }
   }
-  // end caps
-  const capStart = idx.length;
-  for (let i = 0; i < CIRC; i++) {
-    // front cap (s=0)
-    const a = i, b = (i + 1) % CIRC;
-    idx.push(a, b, 'cap0');
-  }
-  // build geometry manually with caps as fans
-  const pos = [];
-  const uvs = [];
-  const index = [];
-  const push = (x, y, z, u, v) => { pos.push(x, y, z); uvs.push(u, v); return pos.length / 3 - 1; };
-  const map = [];
-  for (let s = 0; s < S; s++) {
-    const sec = sections[s];
-    const u = s / (S - 1);
-    const row = [];
-    for (let i = 0; i < CIRC; i++) {
-      row.push(push(verts[(s * CIRC + i) * 3], verts[(s * CIRC + i) * 3 + 1], verts[(s * CIRC + i) * 3 + 2], u, i / CIRC));
-    }
-    map.push(row);
-  }
+  // flat floor (closes the underside between the two floor corners)
   for (let s = 0; s < S - 1; s++) {
-    for (let i = 0; i < CIRC; i++) {
-      const i2 = (i + 1) % CIRC;
-      index.push(map[s][i], map[s + 1][i], map[s][i2]);
-      index.push(map[s][i2], map[s + 1][i], map[s + 1][i2]);
-    }
+    const a = map[s][0], b = map[s][RING - 1];
+    const c = map[s + 1][0], d = map[s + 1][RING - 1];
+    idx.push(a, b, c, b, d, c);
   }
-  // caps
-  const capN = (sections[0].y0 + sections[0].y1) * 0.5;
-  for (const which of [0, S - 1]) {
-    const cIdx = push(sections[which].x, capN, 0, which ? 1 : 0, 0.5);
-    for (let i = 0; i < CIRC; i++) {
-      const i2 = (i + 1) % CIRC;
-      if (which === 0) index.push(cIdx, map[0][i2], map[0][i]);
-      else index.push(cIdx, map[S - 1][i], map[S - 1][i2]);
-    }
-  }
+  // end caps
+  const capF = push(sections[0].x, (sections[0].yBot + sections[0].yTop) / 2, 0);
+  for (let i = 0; i < RING - 1; i++) idx.push(capF, map[0][i], map[0][i + 1]);
+  const capR = push(sections[S - 1].x, (sections[S - 1].yBot + sections[S - 1].yTop) / 2, 0);
+  for (let i = 0; i < RING - 1; i++) idx.push(capR, map[S - 1][i + 1], map[S - 1][i]);
+
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-  g.setIndex(index);
+  const uv = [];
+  const L = Math.max(1, B.length), H = Math.max(0.5, B.height);
+  for (let i = 0; i < pos.length; i += 3) uv.push(pos[i] / L + 0.5, pos[i + 1] / H);
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
   g.computeVertexNormals();
   return g;
 }
 
-// ---------- side-profile body with real wheel arches ----------
-// The lower body is a side silhouette (hood → belt → deck → sills → bumpers)
-// extruded across the car, with semicircular wheel-arch cut-outs in the
-// underside. That is what makes the wheels read as *in* the car instead of
-// hidden behind a slab.
-function bodyProfile(info, def) {
+// Half-annulus flare that lines each wheel opening, so the cut edge reads as a
+// rolled fender lip instead of a hole.
+function archLipGeometry(def) {
   const B = def.body;
-  const L = B.length, belt = info.belt;
-  const nose = L / 2, tail = -L / 2;
-  const axleF = B.wheelbase / 2, axleR = -B.wheelbase / 2;
-  const wheelR = B.wheelR;
-  const cowlX = nose - B.hoodLen;
-  const cabinEndX = cowlX - B.cabinLen;
-  const boxy = B.style === 'van' || B.style === 'truck';
-  const sillY = 0.26 + (boxy ? 0.10 : 0);
-  const bumperY = sillY + 0.07;
-  const hoodNoseY = belt * (boxy ? 0.94 : 0.74);
-  const hoodCowlY = belt * (boxy ? 0.99 : 0.93);
-  const deckY = belt * (boxy ? 0.99 : 0.84);
-  const archR = Math.min(wheelR * 1.10, Math.abs(axleF - cowlX) + 0.2, Math.abs(axleR - tail) - 0.18);
-  const archTop = wheelR + archR;
-
-  const pts = [];
-  const P = (x, y) => pts.push(new THREE.Vector2(x, y));
-  // --- top, front to rear ---
-  P(nose, bumperY + 0.03);
-  P(nose - 0.02, hoodNoseY * 0.86);
-  P(nose - 0.06, hoodNoseY);
-  P(nose - L * 0.09, hoodNoseY * 1.01);
-  P(cowlX - (nose - cowlX) * 0.42, (hoodNoseY + hoodCowlY) * 0.5);
-  P(cowlX, hoodCowlY);
-  P(cowlX, belt);                    // scuttle step up to the belt line
-  P(cabinEndX, belt);                // belt / door line
-  P(cabinEndX - (cabinEndX - tail) * 0.18, deckY);   // step down to the deck
-  P(tail + L * 0.05, deckY);
-  P(tail + 0.015, deckY * 0.97);
-  P(tail, bumperY + 0.03);
-  // --- underside, rear to front, with an arch over each axle ---
-  P(axleR - archR, sillY);
-  const arch = (cx, steps) => {
-    for (let i = 1; i <= steps; i++) {
-      const t = i / steps;
-      const a = Math.PI * (1 - t);            // pi -> 0 : rear edge to front edge
-      P(cx + Math.cos(a) * archR, sillY + Math.sin(a) * (archTop - sillY));
-    }
-  };
-  arch(axleR, 9);
-  P(axleF - archR, sillY);
-  arch(axleF, 9);
-  P(nose - 0.02, bumperY + 0.03);
-  return { pts, nose, tail, belt, cowlX, cabinEndX, hoodCowlY, hoodNoseY, deckY, sillY, bumperY, archR, axleF, axleR, hw: B.width / 2, L, wheelR };
-}
-
-// Extrude a side-profile shape across the car with optional tumblehome:
-// sides taper inward with height and the top edges are crowned.
-function extrudeProfile(shapePts, width, opts = {}) {
-  const shape = new THREE.Shape(shapePts);
-  const { bevelSize = 0.045, taperFrom = 0, taperSpan = 0.4, taper = 0.11, crown = 0.055, topFrom = 0.55, round = 0 } = opts;
-  const depth = Math.max(0.2, width - bevelSize * 2);
-  const geo = new THREE.ExtrudeGeometry(shape, {
-    depth, bevelEnabled: true, bevelThickness: 0.035, bevelSize,
-    bevelSegments: 1, curveSegments: 3, steps: 1,
-  });
-  geo.translate(0, 0, -depth / 2);
-  const pos = geo.attributes.position;
-  const hw0 = width / 2;
-  for (let i = 0; i < pos.count; i++) {
-    const y = pos.getY(i), z = pos.getZ(i);
-    const t = clamp((y - taperFrom) / Math.max(0.15, taperSpan), 0, 1);
-    const zf = Math.min(1, Math.abs(z) / hw0);
-    // round off the shoulder: pull the top corners in slightly, keep the flank flat
-    const r = round * Math.pow(t, 3);
-    pos.setZ(i, z * (1 - r));
-    // crown the middle of the hood/deck upwards — the outer edges stay put so
-    // the side panels remain perfectly flat (no diagonal shading creases)
-    if (y > taperFrom + taperSpan * topFrom) pos.setY(i, y + crown * (1 - zf * zf) * t);
+  const r0 = B.wheelR * 1.02;
+  const r1 = B.wheelR * 1.16;
+  const depth = B.wheelW * 0.55;
+  const steps = 10;
+  const shape = new THREE.Shape();
+  for (let i = 0; i <= steps; i++) {
+    const a = -Math.PI * 0.06 + (i / steps) * Math.PI * 1.12;
+    const x = Math.cos(a) * r0, y = Math.sin(a) * r0;
+    if (i === 0) shape.moveTo(x, y); else shape.lineTo(x, y);
   }
-  pos.needsUpdate = true;
-  geo.computeVertexNormals();
-  return geo;
-}
-
-function bodyExtrudeGeometry(profile, def) {
-  const shape = new THREE.Shape(profile.pts);
-  const bevelSize = 0.045;
-  const depth = Math.max(0.2, def.body.width - bevelSize * 2);
-  const geo = new THREE.ExtrudeGeometry(shape, {
-    depth,
-    bevelEnabled: true,
-    bevelThickness: 0.04,
-    bevelSize,
-    bevelSegments: 2,
-    curveSegments: 4,
-    steps: 1,
-  });
-  geo.translate(0, 0, -depth / 2);
-  // Shape the slab into a car: tumblehome (sides lean in near the belt) and a
-  // crowned top surface, so the hood and deck are not flat planks.
-  const pos = geo.attributes.position;
-  const hw0 = def.body.width / 2;
-  const { sillY, belt } = profile;
-  const span = Math.max(0.15, belt - sillY);
-  for (let i = 0; i < pos.count; i++) {
-    const y = pos.getY(i);
-    const z = pos.getZ(i);
-    const t = clamp((y - sillY) / span, 0, 1);
-    const zf = Math.min(1, Math.abs(z) / hw0);
-    // shoulders lean in above the sill
-    pos.setZ(i, z * (1 - 0.11 * t * t));
-    // top surfaces crown downward at the edges
-    if (y > sillY + span * 0.55) pos.setY(i, y - 0.055 * zf * zf * (0.4 + 0.6 * t));
+  for (let i = steps; i >= 0; i--) {
+    const a = -Math.PI * 0.06 + (i / steps) * Math.PI * 1.12;
+    shape.lineTo(Math.cos(a) * r1, Math.sin(a) * r1);
   }
-  pos.needsUpdate = true;
-  geo.computeVertexNormals();
+  const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false, curveSegments: 1 });
+  geo.translate(0, B.wheelR, -depth / 2);
   return geo;
 }
 
@@ -355,72 +271,97 @@ function paintMaterial(color, finish, opts = {}) {
 }
 
 // ---------- sections per body style ----------
+// Each section: { x, hw, yBot, yTop, shoulderY, nz, ny, tuck, topCrown }
 function bodySections(def) {
   const B = def.body;
   const L = B.length, W = B.width, H = B.height;
   const hw = W / 2;
   const style = B.style;
-  const wedge = style === 'exotic' || style === 'super' ? 0.075 : style === 'muscle' ? 0.02 : 0;
-  const boxy = style === 'van' || style === 'truck' ? 0.15 : 0;
+  const wedge = style === 'exotic' || style === 'super' ? 0.055 : style === 'muscle' ? 0.012 : 0;
+  const boxy = style === 'van' || style === 'truck';
   const wheelR = B.wheelR;
   const axleF = B.wheelbase / 2, axleR = -B.wheelbase / 2;
   const nose = L / 2;
-  const cowlX = nose - B.hoodLen;
-  const cabinEndX = cowlX - B.cabinLen;
-  const wheelTop = wheelR * 2;
-  const sill = 0.26 + boxy * 0.35;
+  const sill = 0.24 + (boxy ? 0.10 : 0);
   const smooth = (t) => t * t * (3 - 2 * t);
   const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+  // how much a fender swells over an axle
   const bump = (x, cx, halfW) => smooth(clamp01(1 - Math.abs(x - cx) / halfW));
 
-  // The centre-line height of the shoulder. The fenders are lifted separately
-  // via edgeLift so the hood can still sit low like a real coupe.
-  const shoulderHood = Math.max(wheelTop + 0.07, H * 0.545);
-  const shoulderDoor = Math.max(wheelTop + 0.10, H * 0.655);
-  const shoulderDeck = Math.max(wheelTop + 0.085, H * 0.625);
+  // Cabin derived first: the hood/belt/deck heights all hang off it.
+  const belt = Math.max(wheelR * 2 + 0.13, H * (boxy ? 0.50 : 0.62));
+  const cabin = cabinSections(def, belt);
+  const hoodTop = (x) => {
+    const t = clamp01((x - cabin.aX) / Math.max(0.2, nose - cabin.aX));
+    const base = Math.max(belt * (boxy ? 0.975 : 0.955), wheelR * 2 + 0.085);
+    return base * (1 - 0.07 * t) - wedge * t;
+  };
+  const deckTop = (x) => {
+    const t = clamp01((cabin.cX - x) / Math.max(0.2, cabin.cX + nose));
+    return Math.max(belt * (boxy ? 0.995 : 0.972), wheelR * 2 + 0.075) * (1 - 0.03 * t);
+  };
 
-  const N = 22;
+  const N = 26;
   const sections = [];
   for (let i = 0; i < N; i++) {
     const f = i / (N - 1);
     const x = nose - L * f;
-    let top, edgeLift = 0;
+    const inCabin = x <= cabin.aX && x >= cabin.cX;
+    let yTop = inCabin ? belt : (x > cabin.aX ? hoodTop(x) : deckTop(x));
 
-    if (x > cowlX) {
-      // hood: slopes down toward the nose, fenders crown up at the axle
-      const t = clamp01((x - cowlX) / Math.max(0.2, nose - cowlX));
-      top = shoulderHood * (1.0 - 0.10 * t) - wedge * 0.10;
-      edgeLift = 0.055 + bump(x, axleF, B.wheelbase * 0.40) * 0.085 + t * 0.02;
-    } else if (x > cabinEndX) {
-      top = shoulderDoor;
-      edgeLift = 0.02 + (bump(x, axleF, B.wheelbase * 0.34) + bump(x, axleR, B.wheelbase * 0.34)) * 0.055;
-    } else {
-      const t = clamp01((cabinEndX - x) / Math.max(0.2, nose - B.hoodLen - B.cabinLen + nose));
-      top = shoulderDeck * (1.0 - 0.07 * t) - wedge * 0.25;
-      edgeLift = 0.05 + bump(x, axleR, B.wheelbase * 0.36) * 0.075;
-    }
     // bumper tuck at both extremes
-    const noseT = clamp01((x - (nose - L * 0.05)) / (L * 0.05));
-    const tailT = clamp01(((nose - L * 0.945) - x) / (L * 0.05));
-    top *= 1 - noseT * 0.12 - tailT * 0.08;
-
-    let bottom = sill - (x > cowlX ? 0.012 : 0);
+    const noseT = clamp01((x - (nose - L * 0.055)) / (L * 0.055));
+    const tailT = clamp01(((nose - L * 0.945) - x) / (L * 0.055));
     const endTuck = Math.max(noseT, tailT);
-    const bumperLine = 0.185 + boxy * 0.12;
-    bottom = bottom * (1 - endTuck) + bumperLine * endTuck;
+    const bumperLine = 0.17 + (boxy ? 0.12 : 0.30);
+    const yBot = sill * (1 - endTuck) + bumperLine * endTuck;
+    yTop = yTop * (1 - endTuck * 0.10);
 
+    // plan-view taper: nose and tail narrow a little
     let whf = 1.0;
-    whf *= 1 - clamp01((f - 0.93) / 0.07) * 0.16;
-    whf *= 1 - clamp01((0.045 - f) / 0.045) * 0.12;
-    whf += (bump(x, axleF, B.wheelbase * 0.30) + bump(x, axleR, B.wheelbase * 0.30)) * 0.028;
+    whf *= 1 - clamp01((f - 0.94) / 0.06) * 0.14;
+    whf *= 1 - clamp01((0.05 - f) / 0.05) * 0.10;
+    const flare = (bump(x, axleF, B.wheelbase * 0.30) + bump(x, axleR, B.wheelbase * 0.30)) * 0.030;
+    whf += flare;
 
-    const n = x > cowlX ? 3.4 : x > cabinEndX ? 4.2 : 3.8;
     sections.push({
-      x, hw: hw * whf, y0: bottom, y1: Math.max(bottom + 0.10, top),
-      n, topNarrow: x > cowlX ? 0.05 : 0.022, edgeLift,
+      x,
+      hw: hw * whf,
+      yBot,
+      yTop: Math.max(yBot + 0.12, yTop),
+      shoulderY: yBot + (yTop - yBot) * (boxy ? 0.80 : 0.66),
+      nz: inCabin ? 6.0 : 4.4,
+      ny: boxy ? 5.0 : inCabin ? 3.0 : 2.2,
+      tuck: 0.10 + (boxy ? 0.0 : 0.02),
+      topCrown: inCabin ? 0.0 : 0.022,
     });
   }
-  return { sections, belt: shoulderDoor + 0.055, hw, H, L, W, noseX: L / 2, tailX: -L / 2, sill, wheelTop };
+  const cowl = cabin.aX, cabinEnd = cabin.cX;
+  return {
+    sections, belt, hw, H, L, W, noseX: L / 2, tailX: -L / 2, sill,
+    wheelTop: wheelR * 2, cabin,
+    cowlX: cowl, cabinEndX: cabinEnd,
+    hoodNoseY: hoodTop(nose), hoodCowlY: hoodTop(cowl), deckY: deckTop(cabinEnd),
+    archR: wheelR * 1.10,
+    hoodYAt: (x) => (x > cowl ? hoodTop(x) : deckTop(x)),
+    // the lofted surface at a given x: top height and half width
+    surfaceAt: (x) => {
+      let a = sections[0], b = sections[sections.length - 1];
+      for (let i = 0; i < sections.length - 1; i++) {
+        if (x <= sections[i].x && x >= sections[i + 1].x) { a = sections[i]; b = sections[i + 1]; break; }
+      }
+      const t = Math.abs(b.x - a.x) < 1e-6 ? 0 : clamp((a.x - x) / (a.x - b.x), 0, 1);
+      return {
+        yTop: a.yTop + (b.yTop - a.yTop) * t,
+        yBot: a.yBot + (b.yBot - a.yBot) * t,
+        hw: a.hw + (b.hw - a.hw) * t,
+      };
+    },
+    halfWidthAt: (x) => {
+      const sec = sections.reduce((best, cur) => (Math.abs(cur.x - x) < Math.abs(best.x - x) ? cur : best), sections[0]);
+      return sec.hw;
+    },
+  };
 }
 
 // The greenhouse as a side profile: windscreen, roof, backlight — extruded
@@ -446,28 +387,34 @@ function cabinGeometry(def, cabin) {
 
 function cabinSections(def, belt) {
   const B = def.body;
-  const roofY = Math.max(belt + 0.20, B.height * (B.style === 'van' || B.style === 'truck' ? 1.0 : 0.985));
-  const glassH = roofY - belt;
-  const aX = B.length / 2 - B.hoodLen + 0.02;          // windscreen base
-  // vans and trucks are cab-plus-box: only the front third is glass
   const boxy = B.style === 'van' || B.style === 'truck';
-  const cabinLen = boxy ? B.cabinLen * 0.62 : B.cabinLen;
-  // windscreen rake (how far forward the roof starts relative to the base)
-  const rakeF = boxy ? Math.min(cabinLen * 0.30, glassH * 0.55) : Math.min(cabinLen * 0.42, glassH * 1.15);
+  // Roof height: a coupe keeps ~2.6 heads of cabin above the belt, a van more.
+  const minCabinH = boxy ? 0.72 : 0.36;
+  const roofY = Math.max(belt + minCabinH, B.height * (boxy ? 0.99 : 0.975));
+  const glassH = roofY - belt;
+  // windscreen base sits behind the hood
+  const aX = B.length / 2 - B.hoodLen;
+  const cabinLen = boxy ? B.cabinLen * 0.60 : Math.min(B.cabinLen, B.length * 0.40);
+  const rakeF = boxy ? Math.min(cabinLen * 0.26, glassH * 0.5) : Math.min(cabinLen * 0.40, glassH * 0.95);
   const roofStart = aX - rakeF;
-  const roofLen = boxy ? cabinLen * 0.72 : Math.max(cabinLen * 0.34, cabinLen * 0.46);
+  const roofLen = boxy ? cabinLen * 0.70 : Math.max(cabinLen * 0.30, cabinLen * 0.42);
   const roofEnd = roofStart - roofLen;
-  const cX = aX - cabinLen;                            // backlight base
-  const rakeR = boxy ? glassH * 0.25 : Math.max(0, roofEnd - cX);
+  const cX = aX - cabinLen;                      // backlight base
+  const rakeR = boxy ? Math.min(glassH * 0.30, cabinLen * 0.22) : Math.max(0, roofEnd - cX);
   return {
     belt, roofY, glassH, aX, cX, rakeF, rakeR, roofLen,
+    roofStart, roofEnd,
     roofMidX: (roofStart + roofEnd) / 2,
-    roofHalfW: (B.width / 2) * 0.94 * 0.76,
+    roofHalfW: (B.width / 2) * 0.80,
     bX: (aX + cX) / 2 - cabinLen * 0.03,
   };
 }
 
 // ---------- wheel ----------
+// Built so the axle is the wheel group's local Z: rotating the *parent* about
+// Y steers the wheel, and spinning the wheel about Z rolls it. Mounting it on
+// the left side mirrors Z (rotation.y = PI), which keeps the rim face outboard
+// and makes both sides roll the same way in world space.
 function buildWheel(rimIdx, rimScale, tireWidth, wheelRadius, quality) {
   const grp = new THREE.Group();
   const rimDef = PARTS.rims[rimIdx] || PARTS.rims[0];
@@ -475,77 +422,76 @@ function buildWheel(rimIdx, rimScale, tireWidth, wheelRadius, quality) {
   const spokes = vis.spokes ?? 0;
   const style = vis.rimStyle || 'steel';
   const tireR = wheelRadius;
-  const rimR = tireR * 0.66 * (rimScale / 1.0);
+  // rim size changes how much of the wheel is rim vs. sidewall, not the radius
+  const rimR = tireR * (0.54 + 0.13 * clamp(rimScale ?? 1, 0.85, 1.2));
 
-  const segs = quality === 'low' ? 12 : 20;
+  const segs = quality === 'low' ? 12 : 22;
   const tireGeo = new THREE.CylinderGeometry(tireR, tireR, tireWidth, segs, 1);
   // square off the shoulder a little
   const pos = tireGeo.attributes.position;
   const halfW = tireWidth / 2;
   for (let i = 0; i < pos.count; i++) {
-    const y = pos.getY(i);
-    if (Math.abs(Math.abs(y) - halfW) < 1e-4) {
+    if (Math.abs(Math.abs(pos.getY(i)) - halfW) < 1e-4) {
       const r = Math.hypot(pos.getX(i), pos.getZ(i));
       if (r > tireR * 0.97) {
-        const k = 0.965;
-        pos.setX(i, pos.getX(i) * k);
-        pos.setZ(i, pos.getZ(i) * k);
+        pos.setX(i, pos.getX(i) * 0.965);
+        pos.setZ(i, pos.getZ(i) * 0.965);
       }
     }
   }
   tireGeo.computeVertexNormals();
-  const tireMat = new THREE.MeshStandardMaterial({ color: '#141414', roughness: 0.92, metalness: 0.02 });
+  const tireMat = new THREE.MeshStandardMaterial({ color: '#16181a', roughness: 0.88, metalness: 0.02 });
   const tire = new THREE.Mesh(tireGeo, tireMat);
-  tire.rotation.z = Math.PI / 2; // axis along X? we want axis along Z
-  tire.rotation.set(0, 0, 0);
-  tire.rotation.x = Math.PI / 2;
+  tire.rotation.x = Math.PI / 2;   // cylinder Y axis -> Z (the axle)
+  tire.userData.wheelPart = 'tire';
   grp.add(tire);
 
-  const rimColor = style === 'steel' ? '#8b9198' : style === 'neon' ? '#cfd6dd' : '#b9c1c9';
+  const rimColor = style === 'steel' ? '#9aa1a8' : style === 'neon' ? '#d7dee5' : '#c2c9d1';
   const rimMat = new THREE.MeshStandardMaterial({
-    color: rimColor, metalness: style === 'steel' ? 0.6 : 0.95,
-    roughness: style === 'steel' ? 0.55 : 0.24,
+    color: rimColor, metalness: style === 'steel' ? 0.65 : 0.95,
+    roughness: style === 'steel' ? 0.5 : 0.26,
     emissive: style === 'neon' ? new THREE.Color('#25e0d0') : new THREE.Color('#000000'),
-    emissiveIntensity: style === 'neon' ? 0.35 : 0,
+    emissiveIntensity: style === 'neon' ? 0.45 : 0,
   });
-  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(rimR, rimR, tireWidth * 0.82, segs, 1, true), rimMat);
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(rimR, rimR, tireWidth * 0.84, segs, 1, true), rimMat);
   barrel.rotation.x = Math.PI / 2;
+  barrel.userData.wheelPart = 'rim';
   grp.add(barrel);
 
-  const faceGeo = [];
-  const face = new THREE.Mesh(new THREE.CylinderGeometry(rimR * 0.96, rimR * 0.9, 0.03, segs, 1), rimMat);
+  // rim face, slightly proud of the tyre's outer sidewall
+  const face = new THREE.Mesh(new THREE.CylinderGeometry(rimR * 0.97, rimR * 0.9, 0.035, segs, 1), rimMat);
   face.rotation.x = Math.PI / 2;
-  face.position.z = tireWidth * 0.40;
+  face.position.z = tireWidth * 0.34;
+  face.userData.wheelPart = 'rim';
   grp.add(face);
 
   if (spokes > 0) {
-    const spokeLen = rimR * 0.92;
-    const spokeW = Math.max(0.028, rimR * (style === 'mesh' ? 0.10 : 0.20));
-    const geo = new THREE.BoxGeometry(spokeW, spokeLen, 0.045);
+    const spokeLen = rimR * 0.9;
+    const spokeW = Math.max(0.03, rimR * (style === 'mesh' ? 0.13 : 0.22));
+    const geo = new THREE.BoxGeometry(spokeW, spokeLen, 0.05);
     for (let i = 0; i < spokes; i++) {
       const m = new THREE.Mesh(geo, rimMat);
       const a = (i / spokes) * Math.PI * 2;
+      m.position.set(Math.cos(a) * spokeLen * 0.5, Math.sin(a) * spokeLen * 0.5, tireWidth * 0.36);
       m.rotation.z = a - Math.PI / 2;
-      const off = style === 'dish' ? spokeLen * 0.5 + 0.02 : spokeLen * 0.5;
-      m.position.set(Math.cos(a + Math.PI / 2) * off * 0 + Math.sin(a) * off * 0, Math.cos(a) * off, tireWidth * 0.40);
-      m.position.x = -Math.sin(a) * off;
-      m.position.y = Math.cos(a) * off;
-      m.position.z = tireWidth * 0.40;
+      m.userData.wheelPart = 'rim';
       grp.add(m);
     }
   }
-  // brake disc
+
+  // brake disc + caliper
   const disc = new THREE.Mesh(
-    new THREE.CylinderGeometry(rimR * 0.62, rimR * 0.62, 0.025, Math.max(8, segs / 2)),
+    new THREE.CylinderGeometry(rimR * 0.62, rimR * 0.62, 0.026, Math.max(8, segs / 2)),
     new THREE.MeshStandardMaterial({ color: '#5c6167', metalness: 0.8, roughness: 0.45 })
   );
   disc.rotation.x = Math.PI / 2;
-  disc.position.z = tireWidth * 0.2;
+  disc.position.z = tireWidth * 0.12;
+  disc.userData.wheelPart = 'rim';
   grp.add(disc);
-  // caliper
   const cal = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.13, 0.05),
     new THREE.MeshStandardMaterial({ color: '#c8322a', metalness: 0.5, roughness: 0.5 }));
-  cal.position.set(-rimR * 0.55, rimR * 0.25, tireWidth * 0.22);
+  cal.position.set(-rimR * 0.55, rimR * 0.25, tireWidth * 0.18);
+  cal.userData.wheelPart = 'rim';
   grp.add(cal);
 
   grp.userData.dispose = () => {
@@ -558,9 +504,6 @@ function buildWheel(rimIdx, rimScale, tireWidth, wheelRadius, quality) {
   return grp;
 }
 
-// ============================================================
-//  CarVisual
-// ============================================================
 export class CarVisual {
   constructor(def, mods, opts = {}) {
     this.def = def;
@@ -580,6 +523,7 @@ export class CarVisual {
     this.brakeLight = 0;
     this.reverseLight = 0;
     this.nitroActive = false;
+    this.lightsOn = false;
     this.build();
   }
 
@@ -615,8 +559,10 @@ export class CarVisual {
   }
 
   rebuild() {
+    const lightsWereOn = this.lightsOn;
     this.clear();
     this.build();
+    this.setLights(lightsWereOn);   // stop the beams flickering on rebuild
   }
 
   build() {
@@ -636,9 +582,9 @@ export class CarVisual {
     bodyMat.emissive = new THREE.Color(paintCol).multiplyScalar(0.06);
     this.bodyMat = bodyMat;
 
-    const profile = bodyProfile(bodyInfo, def);
+    const profile = { ...bodyInfo, ...bodyInfo.cabin };
     this.profile = profile;
-    const bodyGeo = bodyExtrudeGeometry(profile, def);
+    const bodyGeo = loftBody(bodyInfo.sections, def);
     const body = new THREE.Mesh(bodyGeo, bodyMat);
     body.castShadow = true;
     body.receiveShadow = true;
@@ -646,90 +592,127 @@ export class CarVisual {
     this.bodyGroup.add(body);
     this.parts.push(body);
 
-    // ---- greenhouse / glass ----
+    // ---- wheel arches: rolled lips + the dark wheel wells behind them ----
+    const wheelR = B.wheelR;
+    const axleF = B.wheelbase / 2;
+    const axleR = -B.wheelbase / 2;
+    const lipGeo = archLipGeometry(def);
+    const wellMat = new THREE.MeshStandardMaterial({ color: '#0b0c0e', roughness: 0.95, metalness: 0.05 });
+    for (const ax of [axleF, axleR]) {
+      for (const sgn of [1, -1]) {
+        const lip = new THREE.Mesh(lipGeo.clone(), bodyMat);
+        lip.position.set(ax, 0, sgn * (hw - 0.035));
+        lip.castShadow = true;
+        this.bodyGroup.add(lip);
+        this.parts.push(lip);
+        // a dark half-barrel behind the arch so you cannot see through the car
+        const well = new THREE.Mesh(new THREE.CylinderGeometry(wheelR * 1.06, wheelR * 1.06, B.wheelW * 1.35, 14, 1, true, Math.PI * 0.5, Math.PI),
+          new THREE.MeshStandardMaterial({ color: '#08090b', roughness: 1, metalness: 0, side: THREE.DoubleSide }));
+        well.rotation.x = -Math.PI / 2;
+        well.position.set(ax, wheelR, sgn * (hw - 0.12));
+        this.bodyGroup.add(well);
+        this.parts.push(well);
+      }
+    }
+
+    // ---- greenhouse: raked body pillars + recessed glass panels ----
+    // One thin pillar frame around the whole greenhouse keeps it attached to
+    // the body, and the glass sits *inside* that frame instead of floating.
     const cabin = cabinSections(def, beltY);
-    const cabinGeo = cabinGeometry(def, cabin);
+    const hullHalf = hw * 0.90;                     // glass is inset from the flanks
+    const roofHalf = hullHalf * 0.86;                // tumblehome at the roof
+    const glassInset = 0.035;
+    const roundY = (y) => {
+      const t = clamp((y - beltY) / Math.max(0.15, cabin.roofY - beltY), 0, 1);
+      return t * t * (3 - 2 * t);
+    };
+    const halfAt = (y) => hullHalf + (roofHalf - hullHalf) * roundY(y);
+    const sideGlass = (x1, x2, y1, y2, zSign) => {
+      // a quad panel leaning inboard with the tumblehome, in the X-Y plane
+      const len = Math.abs(x2 - x1);
+      const h = y2 - y1;
+      const geo = new THREE.PlaneGeometry(len, h, 1, 3);
+      const posA = geo.attributes.position;
+      const cx = (x1 + x2) / 2;
+      const cy = (y1 + y2) / 2;
+      for (let i = 0; i < posA.count; i++) {
+        const lx = posA.getX(i) + cx;
+        const ly = posA.getY(i) + cy;
+        // place the vertex in world-local space and lean it inboard
+        posA.setXYZ(i, lx, ly, zSign * (halfAt(ly) - glassInset));
+      }
+      geo.computeVertexNormals();
+      const m = new THREE.Mesh(geo, glassMat);
+      m.position.set(0, 0, 0);
+      this.bodyGroup.add(m);
+      this.parts.push(m);
+    };
     const tint = PARTS.tint[mods.tint]?.vis?.tint ?? 0;
     const glassCol = ['#7d97a8', '#405058', '#131a1f', '#c7d2da'][clamp(tint, 0, 3)];
     const glassMat = new THREE.MeshPhysicalMaterial({
-      color: glassCol, metalness: 0.35, roughness: tint >= 2 ? 0.12 : 0.22,
-      transparent: true, opacity: tint === 3 ? 1 : 0.82, side: THREE.DoubleSide,
-      envMapIntensity: 1.3, clearcoat: 1,
+      color: glassCol, metalness: 0.30, roughness: tint >= 2 ? 0.10 : 0.18,
+      transparent: true, opacity: tint === 3 ? 0.92 : 0.72, side: THREE.DoubleSide,
+      envMapIntensity: 1.4, clearcoat: 1,
     });
-    const glass = new THREE.Mesh(cabinGeo, glassMat);
-    glass.castShadow = false;
-    this.bodyGroup.add(glass);
-    this.parts.push(glass);
     this.glassMat = glassMat;
-    // dark cabin interior: without it you see straight through the greenhouse
-    const interior = new THREE.Mesh(new THREE.BoxGeometry(
-      Math.max(0.2, cabin.roofLen * 0.92), cabin.glassH * 0.5, B.width * 0.50
-    ), new THREE.MeshStandardMaterial({ color: '#14171a', roughness: 0.95, metalness: 0.05 }));
-    interior.position.set(cabin.roofMidX, beltY + cabin.glassH * 0.26, 0);
-    this.bodyGroup.add(interior);
-    this.parts.push(interior);
-    // seats (visible through the glass)
-    const seatMat = new THREE.MeshStandardMaterial({ color: '#2a2320', roughness: 0.85 });
+    const beltTrim = beltY + 0.015;
+    // side windows: front door + rear quarter, split by the B pillar
+    const bPillarX = cabin.bX;
     for (const sgn of [1, -1]) {
-      const seat = new THREE.Mesh(new THREE.BoxGeometry(0.34, cabin.glassH * 0.40, 0.28), seatMat);
-      seat.position.set(cabin.bX + 0.10, beltY + cabin.glassH * 0.20, sgn * B.width * 0.13);
-      this.bodyGroup.add(seat);
-      this.parts.push(seat);
+      sideGlass(cabin.aX - cabin.rakeF - 0.02, bPillarX + 0.05, beltTrim, cabin.roofY - 0.045, sgn);
+      if (bPillarX - 0.05 > cabin.cX + cabin.rakeR) {
+        sideGlass(bPillarX - 0.05, cabin.cX + cabin.rakeR, beltTrim, cabin.roofY - 0.045, sgn);
+      }
     }
-
-    // roof skin + pillars sit exactly on the extruded greenhouse
-    const roofY = cabin.roofY;
-    const roofLen = cabin.roofLen;
-    const roofMidX = cabin.roofMidX;
-    let roofHalfW = cabin.roofHalfW;   // follows the tumblehome of the glass
-    const roofPanel = new THREE.Mesh(new THREE.BoxGeometry(roofLen * 1.02, 0.06, roofHalfW * 2.06), bodyMat);
-    roofPanel.position.set(roofMidX, roofY - 0.022, 0);
+    // windscreen and backlight (recline with the pillars)
+    const rakePanel = (xBase, xTop, yBase, yTop, zHalf) => {
+      const geo = new THREE.PlaneGeometry(1, 1, 4, 1);
+      const pA = geo.attributes.position;
+      for (let i = 0; i < pA.count; i++) {
+        const u = pA.getX(i) + 0.5;                 // 0..1 along the panel
+        const v = pA.getY(i) + 0.5;                 // 0..1 across the car
+        const x = xBase + (xTop - xBase) * u;
+        const y = yBase + (yTop - yBase) * u;
+        pA.setXYZ(i, x, y, (v - 0.5) * 2 * zHalf);
+      }
+      geo.computeVertexNormals();
+      const m = new THREE.Mesh(geo, glassMat);
+      this.bodyGroup.add(m);
+      this.parts.push(m);
+    };
+    rakePanel(cabin.aX + 0.01, cabin.aX - cabin.rakeF, beltTrim, cabin.roofY - 0.02, hullHalf * 0.94);
+    rakePanel(cabin.cX - 0.01, cabin.cX + cabin.rakeR, beltTrim, cabin.roofY - 0.02, hullHalf * 0.92);
+    // roof skin: slightly proud of the glass, body coloured
+    const roofPanel = new THREE.Mesh(
+      new THREE.BoxGeometry(Math.max(0.15, cabin.roofLen * 1.02), 0.05, roofHalf * 2.04), bodyMat);
+    roofPanel.position.set(cabin.roofMidX, cabin.roofY - 0.012, 0);
     roofPanel.castShadow = true;
     this.bodyGroup.add(roofPanel);
     this.parts.push(roofPanel);
-    // Pillars: simple body-colour slabs following the glass rake, tilted in
-    // with the tumblehome so they stay flush with the greenhouse.
-    const pillarMat = bodyMat;
-    const pillarBaseZ = cabin.baseHalfW * 0.99;
-    const pillarTopZ = cabin.topHalfW * 0.99;
-    roofHalfW = cabin.topHalfW;
-    const lean = Math.atan2(pillarBaseZ - pillarTopZ, Math.max(0.15, cabin.glassH));
-    const pillar = (x1, y1, x2, y2, thick, wide) => {
-      const len = Math.hypot(x2 - x1, y2 - y1);
-      const angle = Math.atan2(y2 - y1, x2 - x1);
+    // pillars: A, B, C — thin posts standing on the body, canted with the glass
+    const pillar = (xTop, xBase, yTop, yBase, thick, name) => {
+      const len = Math.hypot(xTop - xBase, yTop - yBase) + 0.04;
       for (const sgn of [1, -1]) {
-        const m = new THREE.Mesh(new THREE.BoxGeometry(len, thick, wide), pillarMat);
-        m.position.set((x1 + x2) / 2, (y1 + y2) / 2, sgn * (pillarBaseZ + pillarTopZ) / 2);
-        m.rotation.z = angle;
-        m.rotation.x = -sgn * lean;
+        const m = new THREE.Mesh(new THREE.BoxGeometry(thick, len, 0.05), bodyMat);
+        m.position.set((xTop + xBase) / 2, (yTop + yBase) / 2, sgn * (halfAt((yTop + yBase) / 2) - glassInset - 0.012));
+        m.rotation.z = Math.atan2(yTop - yBase, xTop - xBase) - Math.PI / 2;
+        m.rotation.y = -sgn * 0.22;
         m.castShadow = true;
         this.bodyGroup.add(m);
         this.parts.push(m);
       }
     };
-    pillar(cabin.aX, beltY + 0.03, cabin.aX - cabin.rakeF, roofY - 0.02, 0.055, 0.05);   // A
-    pillar(cabin.cX, beltY + 0.03, cabin.cX + cabin.rakeR, roofY - 0.02, 0.065, 0.05);   // C
-    pillar(cabin.bX + 0.05, beltY + 0.03, cabin.bX + 0.01, roofY - 0.03, 0.040, 0.045);  // B
-
-    // ---- floor pan (closes the underside between the sills) ----
-    const pan = new THREE.Mesh(
-      new THREE.BoxGeometry(B.wheelbase * 1.5, 0.16, hw * 1.55),
-      new THREE.MeshStandardMaterial({ color: '#0a0b0d', roughness: 0.95, metalness: 0.1 })
-    );
-    pan.position.set(0.02, 0.30, 0);
-    this.bodyGroup.add(pan);
-    this.parts.push(pan);
+    pillar(cabin.aX - cabin.rakeF, cabin.aX, cabin.roofY - 0.01, beltY + 0.02, 0.075, 'A');
+    pillar(bPillarX + 0.03, bPillarX - 0.03, cabin.roofY - 0.02, beltY + 0.02, 0.055, 'B');
+    pillar(cabin.cX + cabin.rakeR, cabin.cX, cabin.roofY - 0.01, beltY + 0.02, 0.070, 'C');
 
     // ---- wheels ----
-    const wheelR = B.wheelR;
     const rimIdx = mods.rims ?? 1;
     const rimScale = PARTS.rimSize[mods.rimSize]?.vis?.rimScale ?? 1.0;
     const widthMul = PARTS.rims[rimIdx]?.vis?.rimStyle === 'dish' ? 1.12 : 1.0;
-    const axleF = B.wheelbase / 2;
-    const axleR = -B.wheelbase / 2;
     // keep the tyre face flush with (or just proud of) the bodywork
-    const flareOut = (mods.frontBumper >= 2 || mods.rearBumper >= 2) ? 0.06 : 0.025;
-    const wheelHalfTrack = Math.max(B.track / 2, hw - B.wheelW * 0.50) + flareOut * 0.5;
+    const flareOut = (mods.frontBumper >= 2 || mods.rearBumper >= 2) ? 0.05 : 0.015;
+    const wheelHalfTrack = Math.min(B.track / 2, hw - B.wheelW * 0.60) + flareOut * 0.5;
     const wheelPositions = [
       [axleF, wheelHalfTrack], [axleF, -wheelHalfTrack],
       [axleR, wheelHalfTrack], [axleR, -wheelHalfTrack],
@@ -740,10 +723,16 @@ export class CarVisual {
       const holder = new THREE.Group();
       holder.position.set(wheelPositions[i][0], wheelR, wheelPositions[i][1]);
       holder.add(w);
-      // mirror the rim so it faces outward on both sides
+      // Mirroring Z turns the rim face outboard on the left side. Because the
+      // mirror also flips the axle direction, both sides then roll the same way
+      // in world space for a single spin value.
       if (wheelPositions[i][1] < 0) w.rotation.y = Math.PI;
       this.group.add(holder);
-      this.wheels.push({ grp: holder, spin: w, isFront, side: wheelPositions[i][1] > 0 ? 1 : -1, base: holder.position.clone() });
+      this.wheels.push({
+        grp: holder, spin: w, isFront,
+        side: wheelPositions[i][1] > 0 ? 1 : -1,
+        base: holder.position.clone(),
+      });
     }
 
     // ---- lights ----
@@ -761,40 +750,42 @@ export class CarVisual {
     });
     this.headMat = headMat; this.tailMat = tailMat; this.revMat = revMat;
 
-    const lampW = hw * 0.42, lampH = B.height * 0.075, lampD = 0.05;
+    const surfaceAt = bodyInfo.surfaceAt;
+    const lampW = hw * 0.40, lampH = B.height * 0.072, lampD = 0.05;
     const noseX = B.length / 2;
-    const headY = beltY * 0.66;
+    // lamps live on the bumper faces, so query the shell just inboard of each end
+    const noseSurf = surfaceAt(noseX - 0.30);
+    const tailSurf = surfaceAt(-noseX + 0.30);
+    const headY = noseSurf.yBot + (noseSurf.yTop - noseSurf.yBot) * 0.62 + lampH * 0.5;
+    const tailY = tailSurf.yBot + (tailSurf.yTop - tailSurf.yBot) * 0.58 + lampH * 0.5;
     for (const sgn of [1, -1]) {
       const hl = new THREE.Mesh(new THREE.BoxGeometry(0.07, lampH, lampW), headMat);
-      hl.position.set(noseX - 0.20, headY, sgn * hw * 0.60);
+      hl.position.set(noseX - 0.16, headY, sgn * noseSurf.hw * 0.58);
       this.bodyGroup.add(hl); this.parts.push(hl);
-      const tl = new THREE.Mesh(new THREE.BoxGeometry(0.06, lampH, lampW * 1.15), tailMat);
-      tl.position.set(-noseX + 0.115, headY + 0.06, sgn * hw * 0.58);
+      const tl = new THREE.Mesh(new THREE.BoxGeometry(0.06, lampH, lampW * 1.1), tailMat);
+      tl.position.set(-noseX + 0.14, tailY, sgn * tailSurf.hw * 0.56);
       this.bodyGroup.add(tl); this.parts.push(tl);
       // reverse lamp
-      const rv = new THREE.Mesh(new THREE.BoxGeometry(0.05, lampH * 0.30, lampW * 0.26), revMat);
-      rv.position.set(-noseX + 0.10, headY - lampH * 0.05, sgn * hw * 0.26);
+      const rv = new THREE.Mesh(new THREE.BoxGeometry(0.05, lampH * 0.30, lampW * 0.24), revMat);
+      rv.position.set(-noseX + 0.13, tailY - lampH * 0.02, sgn * tailSurf.hw * 0.24);
       this.bodyGroup.add(rv); this.parts.push(rv);
     }
     // third brake light
     const chmsl = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.045, hw * 0.7), tailMat);
-    chmsl.position.set(-noseX + 0.16, beltY + 0.10, 0);
+    chmsl.position.set(-noseX + 0.20, profile.deckY + 0.02, 0);
     this.bodyGroup.add(chmsl); this.parts.push(chmsl);
 
     // ---- grille + bumper aero ----
     // the aero parts must sit on the actual panels, not at the belt line
-    const hoodYAt = (x) => {
-      const t = clamp((x - (noseX - B.hoodLen)) / Math.max(0.2, B.hoodLen), 0, 1);
-      return profile.hoodNoseY + (profile.hoodCowlY - profile.hoodNoseY) * (1 - t);
-    };
+    const hoodYAt = (x) => profile.hoodYAt(x);
     const deckTop = profile.deckY;
     const fbStyle = PARTS.frontBumper[mods.frontBumper]?.vis?.frontBumper ?? 0;
     const rbStyle = PARTS.rearBumper[mods.rearBumper]?.vis?.rearBumper ?? 0;
     const trimMat = new THREE.MeshStandardMaterial({ color: '#14171b', roughness: 0.55, metalness: 0.35 });
     const carbonMat = new THREE.MeshPhysicalMaterial({ color: '#0c0e10', roughness: 0.3, metalness: 0.6, clearcoat: 1 });
 
-    const grille = new THREE.Mesh(new THREE.BoxGeometry(0.06, B.height * 0.14, hw * 0.9), trimMat);
-    grille.position.set(noseX - 0.06, beltY * 0.52, 0);
+    const grille = new THREE.Mesh(new THREE.BoxGeometry(0.06, B.height * 0.13, noseSurf.hw * 0.86), trimMat);
+    grille.position.set(noseX - 0.05, headY - lampH * 0.55, 0);
     this.bodyGroup.add(grille); this.parts.push(grille);
 
     // front lip / splitter
@@ -911,13 +902,15 @@ export class CarVisual {
       }
     }
 
-    // ---- mirrors ----
+    // ---- mirrors: mounted on the belt line just behind the A pillar ----
+    const mirX = clamp(cabin.aX - 0.10, -noseX + 0.3, noseX - 0.3);
+    const mirSurf = surfaceAt(mirX);
     for (const sgn of [1, -1]) {
-      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.04, 0.12), trimMat);
-      arm.position.set(noseX - B.hoodLen + 0.06, beltY + 0.14, sgn * (hw * 0.92 + 0.05));
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.035, 0.09), trimMat);
+      arm.position.set(mirX, beltY + 0.045, sgn * (mirSurf.hw * 0.97));
       this.bodyGroup.add(arm); this.parts.push(arm);
-      const mir = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.1, 0.16), bodyMat);
-      mir.position.set(noseX - B.hoodLen + 0.04, beltY + 0.17, sgn * (hw * 0.92 + 0.13));
+      const mir = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.09, 0.15), bodyMat);
+      mir.position.set(mirX - 0.02, beltY + 0.075, sgn * (mirSurf.hw * 0.97 + 0.055));
       this.bodyGroup.add(mir); this.parts.push(mir);
     }
 
@@ -931,7 +924,7 @@ export class CarVisual {
         const z = count === 1 ? -hw * 0.55 : (i - (count - 1) / 2) * spacing;
         const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.05, 0.22, 10), tipMat);
         tip.rotation.z = Math.PI / 2;
-        tip.position.set(-noseX - 0.02, 0.20, z);
+        tip.position.set(-noseX + 0.04, Math.max(0.19, tailSurf.yBot + 0.06), z);
         this.bodyGroup.add(tip); this.parts.push(tip);
       }
     }
@@ -940,31 +933,37 @@ export class CarVisual {
     const interiorCol = PARTS.interiorColor[mods.interiorColor]?.vis?.interior || '#1b1d20';
     const interiorMat = new THREE.MeshStandardMaterial({ color: interiorCol, roughness: 0.8, metalness: 0.1 });
     const seatsStyle = PARTS.seats[mods.seats]?.vis?.seats ?? 0;
+    // Seats must fit *under* the roof: the backrest height is capped by the
+    // cabin height, otherwise the headrests poke through the roof skin.
+    const seatTopMax = cabin.roofY - 0.075;
+    const backH = Math.min(seatsStyle === 2 ? 0.46 : 0.38, Math.max(0.18, seatTopMax - (beltY - 0.02)));
+    const seatH = Math.max(0.12, Math.min(0.34, seatTopMax - (beltY - 0.02) - 0.05));
+    const seatX = clamp(cabin.bX + 0.06, cabin.cX + 0.25, cabin.aX - 0.32);
     for (const sgn of [1, -1]) {
-      const seat = new THREE.Mesh(new THREE.BoxGeometry(0.42, seatsStyle === 2 ? 0.5 : 0.44, 0.44),
+      const seat = new THREE.Mesh(new THREE.BoxGeometry(0.40, seatH, 0.42),
         seatsStyle === 1 ? new THREE.MeshStandardMaterial({ color: interiorCol, roughness: 0.6 }) : interiorMat);
-      seat.position.set(-B.cabinLen * 0.12, beltY - 0.02, sgn * hw * 0.42);
+      seat.position.set(seatX, beltY - 0.02 + seatH * 0.5, sgn * hw * 0.36);
       this.bodyGroup.add(seat); this.parts.push(seat);
-      const back = new THREE.Mesh(new THREE.BoxGeometry(0.10, seatsStyle === 2 ? 0.52 : 0.46, 0.42), interiorMat);
-      back.position.set(-B.cabinLen * 0.12 - 0.24, beltY + 0.16, sgn * hw * 0.42);
+      const back = new THREE.Mesh(new THREE.BoxGeometry(0.10, backH, 0.40), interiorMat);
+      back.position.set(seatX - 0.22, beltY - 0.02 + backH * 0.5, sgn * hw * 0.36);
       this.bodyGroup.add(back); this.parts.push(back);
     }
     // steering wheel
     const wheelStyle = PARTS.wheel[mods.wheel]?.vis?.wheel ?? 0;
     const sw = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.022, 6, 12),
       new THREE.MeshStandardMaterial({ color: wheelStyle === 2 ? '#151719' : '#22262b', metalness: 0.3, roughness: 0.7 }));
-    sw.position.set(noseX - B.hoodLen - 0.5, beltY + 0.16, hw * 0.42);
+    sw.position.set(clamp(cabin.aX - 0.42, cabin.cX + 0.2, noseX), beltY + 0.13, hw * 0.34);
     sw.rotation.y = Math.PI / 2;
     this.bodyGroup.add(sw); this.parts.push(sw);
     // dash
     const dashStyle = PARTS.dash[mods.dash]?.vis?.dash ?? 0;
     const dash = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.2, hw * 1.5), interiorMat);
-    dash.position.set(noseX - B.hoodLen - 0.30, beltY + 0.06, 0);
+    dash.position.set(clamp(cabin.aX - 0.26, cabin.cX + 0.1, noseX), beltY + 0.04, 0);
     this.bodyGroup.add(dash); this.parts.push(dash);
     if (dashStyle >= 1) {
       const gauge = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.08, 0.2),
         new THREE.MeshStandardMaterial({ color: '#0a0c0e', emissive: new THREE.Color('#25e0d0'), emissiveIntensity: 0.7 }));
-      gauge.position.set(noseX - B.hoodLen - 0.38, beltY + 0.18, hw * 0.42);
+      gauge.position.set(clamp(cabin.aX - 0.34, cabin.cX + 0.14, noseX), beltY + 0.15, hw * 0.34);
       this.bodyGroup.add(gauge); this.parts.push(gauge);
     }
 
@@ -982,6 +981,27 @@ export class CarVisual {
       this.group.add(light);
       this.underglowLight = light;
     }
+
+    // ---- headlight beams (real light, so night driving is possible) ----
+    // Two spots aimed forward: a wide low beam plus a narrow thrower. They are
+    // only switched on at night / in fog by setLights().
+    this.beamLights = [];
+    const beamY = beltY * 0.72;
+    for (const sgn of this.quality === 'low' ? [] : [1, -1]) {
+      const near = new THREE.SpotLight('#ffe6bd', 0, 46, 0.62, 0.55, 1.6);
+      near.position.set(noseX - 0.10, beamY, sgn * hw * 0.55);
+      near.target.position.set(noseX + 26, -1.4, sgn * hw * 1.5);
+      this.bodyGroup.add(near, near.target);
+      this.beamLights.push(near);
+    }
+    if (this.quality !== 'low') {
+      const thrower = new THREE.SpotLight('#f2f6ff', 0, 105, 0.30, 0.42, 1.35);
+      thrower.position.set(noseX - 0.10, beamY + 0.05, 0);
+      thrower.target.position.set(noseX + 70, -2.5, 0);
+      this.bodyGroup.add(thrower, thrower.target);
+      this.beamLights.push(thrower);
+    }
+    this.setLights(this.lightsOn);
 
     // ---- contact shadow blob (keeps the car grounded) ----
     const shadowGeo = new THREE.PlaneGeometry(B.length * 1.15, W * 1.5);
@@ -1018,8 +1038,9 @@ export class CarVisual {
     const baseY = B.wheelR;
     for (const w of this.wheels) {
       w.grp.position.y = baseY;
-      // lowered cars: body drops, wheels stay
-      w.spin.rotation.z = camber * (w.isFront ? 1 : 0.6) * w.side;
+      // camber tilts the whole wheel inwards at the top: rotate about the
+      // longitudinal (X) axis, never about the spin axis
+      w.grp.rotation.x = camber * (w.isFront ? 1 : 0.6) * w.side;
     }
     this.bodyGroup.position.y = ride + (this.bodyDrop ?? 0);
     this.bodyGroup.position.y = 0;
@@ -1031,6 +1052,13 @@ export class CarVisual {
     this.lightsOn = on;
     if (this.headMat) this.headMat.emissiveIntensity = on ? 1.7 : 0.35;
     if (this.tailMat && !this.brakeLight) this.tailMat.emissiveIntensity = on ? 0.55 : 0.3;
+    if (this.beamLights && this.beamLights.length === 3) {
+      const [l1, l2, thrower] = this.beamLights;
+      l1.intensity = on ? 26 : 0;
+      l2.intensity = on ? 26 : 0;
+      thrower.intensity = on ? 34 : 0;
+      l1.visible = l2.visible = thrower.visible = !!on;
+    }
   }
 
   setBrake(v) {
@@ -1050,10 +1078,13 @@ export class CarVisual {
     this.steer += (steerTarget - this.steer) * Math.min(1, dt * 12);
     this.wheelSpin += state.wheelDelta || 0;
 
+    // spin sign: rolling forward must make the tyre surface move backwards at
+    // the contact patch, i.e. the rim turns the other way around +Z.
     for (let i = 0; i < 4; i++) {
       const w = this.wheels[i];
-      w.grp.rotation.y = w.isFront ? this.steer * 0.55 : 0;
-      w.spin.rotation.x = this.wheelSpin;
+      // +steer (from the physics) turns left, and +rotation.y is left here
+      w.grp.rotation.y = w.isFront ? this.steer * 0.9 : 0;
+      w.spin.rotation.z = -this.wheelSpin;
       const sus = state.suspension ? state.suspension[i] : 0;
       const ride = PARTS.ride[this.mods.ride]?.stats?.rideHeight || 0;
       const bump = sus * 0.055;

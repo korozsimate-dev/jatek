@@ -111,7 +111,9 @@ export class AIDriver {
       }
     }
 
-    const steerCmd = clamp(diff * 2.3, -1, 1);
+    // Controller convention: steer > 0 = turn right. A positive heading error
+    // means the car points left of the target, so the sign is inverted here.
+    const steerCmd = clamp(-diff * 2.3, -1, 1);
     this.steerSmooth += (steerCmd - this.steerSmooth) * Math.min(1, dt * 9);
 
     // target speed based on upcoming curvature
@@ -141,7 +143,7 @@ export class AIDriver {
     // big slides: lift and counter-steer
     if (Math.abs(v.slipAngle) > 0.28) {
       throttle *= 0.55;
-      this.steerSmooth -= Math.sign(v.slipAngle) * 0.28;
+      this.steerSmooth += Math.sign(v.slipAngle) * 0.28;
     }
     if (Math.abs(v.slipAngle) > 0.45) handbrake = 0;
     // stuck detection

@@ -73,9 +73,9 @@ export const CONFIG = {
 };
 
 export const QUALITY = {
-  low:    { traffic: 10, peds: 18,  shadows: false, pixelRatio: 1.0, bloom: false, lampLights: 2, fogNear: 260, fogFar: 620, particles: 0.4 },
-  medium: { traffic: 16, peds: 34,  shadows: true,  pixelRatio: 1.35, bloom: true,  lampLights: 4, fogNear: 340, fogFar: 820, particles: 0.8 },
-  high:   { traffic: 22, peds: 52,  shadows: true,  pixelRatio: 2.0, bloom: true,  lampLights: 6, fogNear: 420, fogFar: 1050, particles: 1.0 },
+  low:    { traffic: 10, peds: 18,  shadows: false, pixelRatio: 1.0, bloom: false, lampLights: 4, fogNear: 260, fogFar: 620, particles: 0.4 },
+  medium: { traffic: 16, peds: 34,  shadows: true,  pixelRatio: 1.35, bloom: true,  lampLights: 8, fogNear: 340, fogFar: 820, particles: 0.8 },
+  high:   { traffic: 22, peds: 52,  shadows: true,  pixelRatio: 2.0, bloom: true,  lampLights: 10, fogNear: 420, fogFar: 1050, particles: 1.0 },
 };
 
 export const DISTRICTS = [

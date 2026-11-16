@@ -5,6 +5,7 @@ const suites = [
   ['unit', 'test/run-tests.mjs'],
   ['integration', 'test/integration.mjs'],
   ['map', 'test/validate-map.mjs'],
+  ['geometry', 'test/geometry.mjs'],
   ['smoke', 'test/smoke-dom.mjs'],
   ['page', 'test/page-check.mjs'],
 ];

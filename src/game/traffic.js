@@ -29,6 +29,9 @@ export class TrafficCar {
       suspension: 0, ride: 0, camber: 0,
     }, { quality });
     this.group = this.visual.group;
+    // Traffic runs with its headlights on: this is what makes the streets read
+    // as lit at night without paying for 20 more spot lights.
+    this.visual.setLights(true);
     this.network = network;
     this.speed = 0;
     this.targetSpeed = 11;
@@ -95,7 +98,8 @@ export class TrafficCar {
     while (diff < -Math.PI) diff += Math.PI * 2;
     const turnRate = 1.9;
     this.heading += clamp(diff, -turnRate * dt, turnRate * dt);
-    this.steer = clamp(diff * 1.6, -0.55, 0.55);
+    // the visual uses the controller convention (steer > 0 = wheels right)
+    this.steer = clamp(-diff * 1.6, -0.55, 0.55);
 
     // speed control
     let want = 12 + (this.def.hp > 200 ? 3 : 0);
