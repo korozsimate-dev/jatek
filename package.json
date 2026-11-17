@@ -1,0 +1,33 @@
+{
+  "name": "street-empire",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "STREET EMPIRE - 3D open-world street racing game",
+  "scripts": {
+    "start": "node scripts/start.mjs",
+    "simple": "node scripts/start.mjs",
+    "dev": "vite --host 0.0.0.0 --port 5173",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 4173",
+    "test": "node scripts/check-node.mjs && node test/run-tests.mjs",
+    "test:integration": "node scripts/check-node.mjs && node test/integration.mjs",
+    "test:map": "node scripts/check-node.mjs && node test/validate-map.mjs",
+    "test:smoke": "node scripts/check-node.mjs && node test/smoke-dom.mjs",
+    "test:all": "node scripts/test-all.mjs",
+    "serve": "node scripts/start.mjs",
+    "test:page": "node scripts/check-node.mjs && node test/page-check.mjs"
+  },
+  "dependencies": {
+    "three": "^0.187.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "browserslist": [
+    "defaults and supports es6-module"
+  ],
+  "optionalDependencies": {
+    "vite": "^8.3.8"
+  }
+}
