@@ -1263,3 +1263,138 @@ export function buildTrafficCar(def, color, quality = 'low') {
   };
   return new CarVisual(def, mods, { quality });
 }
+
+// ------------------------------------------------------------------
+// Batched car body for ambient traffic.
+//
+// A full CarVisual is ~24 separate meshes (body, glass, wheels, lights...).
+// Twenty of those in the streets is ~500 draw calls, which is a real part of
+// the stutter. This flattens the same silhouette into THREE meshes — painted
+// bodywork, dark trim/glass, and the four wheels (which stay separate so they
+// can spin) — for roughly a 6x cut in draw calls per car.
+// ------------------------------------------------------------------
+export function buildBatchedCarVisual(def, color, rimColor = '#9aa1a8') {
+  const B = def.body;
+  const hw = B.width / 2;
+  const wheelR = B.wheelR;
+  const axleF = B.wheelbase / 2;
+  const axleR = -B.wheelbase / 2;
+  const L = B.length;
+  const nose = L / 2;
+  const boxy = B.style === 'van' || B.style === 'truck';
+  const belt = Math.max(wheelR * 2 + 0.13, B.height * (boxy ? 0.5 : 0.62));
+  const roofY = boxy ? B.height : Math.min(B.height, belt + 0.42);
+  const cabinLen = B.cabinLen || L * 0.42;
+  const cabinF = nose - (B.hoodLen || L * 0.3) - cabinLen * 0.15;
+  const cabinR = cabinF - cabinLen;
+
+  const paint = [];
+  const dark = [];
+
+  const box = (list, w, h, d, x, y, z) => {
+    const g = new THREE.BoxGeometry(w, h, d);
+    g.translate(x, y, z);
+    list.push(g);
+  };
+
+  // lower body (two boxes: sills + main volume keeps the silhouette from
+  // being a single slab)
+  box(paint, L, belt * 0.52, B.width * 0.96, 0, belt * 0.30, 0);
+  box(paint, L * 0.985, belt * 0.30, B.width, 0, belt * 0.62, 0);
+  // slight nose/tail taper
+  box(paint, L * 0.10, belt * 0.44, B.width * 0.86, nose - L * 0.02, belt * 0.42, 0);
+  box(paint, L * 0.09, belt * 0.44, B.width * 0.88, -nose + L * 0.02, belt * 0.44, 0);
+  // wheel-arch shoulders
+  for (const ax of [axleF, axleR]) {
+    for (const sgn of [1, -1]) {
+      box(paint, wheelR * 2.5, 0.16, 0.12, ax, wheelR + 0.16, sgn * (hw - 0.03));
+    }
+  }
+  // roof / cabin
+  box(paint, cabinLen, roofY - belt, B.width * 0.78, (cabinF + cabinR) / 2, (roofY + belt) / 2, 0);
+  // windscreen + backlight + side glass sit a hair proud of the cabin
+  box(dark, cabinLen * 0.99, (roofY - belt) * 0.86, B.width * 0.80, (cabinF + cabinR) / 2, (roofY + belt) / 2 - 0.01, 0);
+  box(paint, cabinLen * 0.86, (roofY - belt) * 0.72, B.width * 0.815, (cabinF + cabinR) / 2, (roofY + belt) / 2 + 0.005, 0);
+  // grille and lights
+  box(dark, 0.06, 0.20, B.width * 0.62, nose - 0.03, belt * 0.40, 0);
+  box(dark, 0.06, 0.16, B.width * 0.72, -nose + 0.03, belt * 0.44, 0);
+  for (const sgn of [1, -1]) {
+    box(dark, 0.07, 0.12, B.width * 0.20, nose - 0.02, belt * 0.66, sgn * hw * 0.62);
+    box(dark, 0.07, 0.11, B.width * 0.22, -nose + 0.02, belt * 0.66, sgn * hw * 0.62);
+    // mirrors
+    box(dark, 0.10, 0.07, 0.09, cabinF + 0.10, belt + 0.10, sgn * (hw * 0.94));
+  }
+
+  const group = new THREE.Group();
+  const paintMat = new THREE.MeshStandardMaterial({
+    color, roughness: 0.42, metalness: 0.25, envMapIntensity: 0.9,
+  });
+  const darkMat = new THREE.MeshStandardMaterial({ color: '#14171b', roughness: 0.55, metalness: 0.25 });
+
+  const paintMesh = new THREE.Mesh(mergeGeometries(paint), paintMat);
+  paintMesh.castShadow = true;
+  paintMesh.receiveShadow = true;
+  group.add(paintMesh);
+  const darkMesh = new THREE.Mesh(mergeGeometries(dark), darkMat);
+  darkMesh.castShadow = false;
+  group.add(darkMesh);
+
+  // four wheels, batched into one mesh each so they can spin
+  const wheels = [];
+  const rimMat = new THREE.MeshStandardMaterial({ color: rimColor, roughness: 0.45, metalness: 0.7 });
+  for (const ax of [axleF, axleR]) {
+    for (const sgn of [1, -1]) {
+      const parts = [];
+      const tyre = new THREE.CylinderGeometry(wheelR, wheelR, B.wheelW, 10, 1);
+      tyre.rotateX(Math.PI / 2);
+      parts.push(tyre);
+      const rim = new THREE.CylinderGeometry(wheelR * 0.58, wheelR * 0.58, B.wheelW * 0.55, 8, 1);
+      rim.rotateX(Math.PI / 2);
+      parts.push(rim);
+      const wheelMesh = new THREE.Mesh(mergeGeometries(parts), wheelRimMat(rimMat));
+      wheelMesh.position.set(ax, wheelR, sgn * (hw - B.wheelW * 0.55));
+      wheelMesh.castShadow = false;
+      group.add(wheelMesh);
+      wheels.push(wheelMesh);
+    }
+  }
+
+  group.userData.dispose = () => {
+    paintMesh.geometry.dispose(); paintMat.dispose();
+    darkMesh.geometry.dispose(); darkMat.dispose();
+    for (const w of wheels) { w.geometry.dispose(); }
+    rimMat.dispose();
+  };
+  return { group, wheels, paintMesh, darkMesh };
+}
+
+// tiny multi-material wheel helper: tyre + rim in one geometry needs groups,
+// so keep it to a single material and fake the rim with an inset disc instead
+function wheelRimMat(mat) { return mat; }
+
+// merge a list of indexed BoxGeometry/CylinderGeometry into one BufferGeometry
+export function mergeGeometries(list) {
+  const geos = list.map((g) => (g.index ? g.toNonIndexed() : g));
+  let total = 0;
+  for (const g of geos) total += g.attributes.position.count;
+  const pos = new Float32Array(total * 3);
+  const nor = new Float32Array(total * 3);
+  const uv = new Float32Array(total * 2);
+  let o = 0, uo = 0;
+  for (const g of geos) {
+    const p = g.attributes.position.array;
+    const n = g.attributes.normal.array;
+    pos.set(p, o);
+    nor.set(n, o);
+    const count = g.attributes.position.count;
+    if (g.attributes.uv) uv.set(g.attributes.uv.array, uo);
+    o += count * 3;
+    uo += count * 2;
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  out.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  out.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  out.computeBoundingSphere();
+  return out;
+}

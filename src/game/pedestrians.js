@@ -41,6 +41,8 @@ export class Pedestrian {
     this.homeX = x; this.homeZ = z;
     this.flinch = 0;
     this.meshes = [this.legL, this.legR, this.torso, this.head, this.armL, this.armR];
+    // distance culling: 6 draw calls per pedestrian adds up fast
+    this.cullDist = 150;
     this.materials = [shirt, pants, skin];
     this.geos = geos;
   }
@@ -85,7 +87,9 @@ export class Pedestrian {
     this.armR.rotation.z = sw * 0.7;
     this.group.position.set(this.x, 0.17, this.z);
     this.group.rotation.y = this.heading;
-    this.group.visible = Math.abs(this.x) < 520 && Math.abs(this.z) < 520;
+    // only draw pedestrians close enough to read on screen
+    const camD = this.camX != null ? Math.hypot(this.x - this.camX, this.z - this.camZ) : 0;
+    this.group.visible = camD < this.cullDist && Math.abs(this.x) < 520 && Math.abs(this.z) < 520;
   }
 }
 
@@ -127,10 +131,12 @@ export class PedestrianSystem {
 
   update(dt, player, centre) {
     if (!this.enabled) return;
+    const cam = this.camPos;
     for (const p of this.peds) {
+      if (cam) { p.camX = cam.x; p.camZ = cam.z; }
       p.update(dt, player);
       // soft relocation if too far from the player
-      if (Math.hypot(p.x - centre.x, p.z - centre.z) > 300) {
+      if (Math.hypot(p.x - centre.x, p.z - centre.z) > 230) {
         const bl = this.blocks[Math.floor(Math.random() * this.blocks.length)];
         const s = (bl.size - 6.4) / 2 - 2;
         p.x = bl.cx + (Math.random() * 2 - 1) * s;

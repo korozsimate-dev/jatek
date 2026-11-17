@@ -12,7 +12,7 @@ import { CAR_BY_ID, computeStats, defaultMods, rankFor } from '../data/cars.js';
 import { City } from '../world/city.js';
 import { MATS } from '../world/buildings.js';
 import { Environment } from '../world/environment.js';
-import { makeEnv, CarVisual } from '../world/carMesh.js';
+import { makeEnv, CarVisual, buildBatchedCarVisual } from '../world/carMesh.js';
 import { Vehicle } from '../physics/vehicle.js';
 import { Player } from './player.js';
 import { CameraRig } from './camera.js';
@@ -204,7 +204,11 @@ export class Game {
 
   // ================= world setup =================
   spawnParkedCars() {
-    for (const pc of this.parkedCars) { this.scene.remove(pc.visual.group); pc.visual.dispose(); }
+    for (const pc of this.parkedCars) {
+      this.scene.remove(pc.group);
+      if (pc.batched) pc.group.userData.dispose?.();
+      else pc.visual.dispose();
+    }
     this.parkedCars.length = 0;
     // a few ambient parked cars around the spawn / garage / meet
     const spots = [
@@ -223,12 +227,13 @@ export class Game {
       if (!def) continue;
       const mods = defaultMods(def);
       mods.paintColor = color;
-      const visual = new CarVisual(def, mods, { quality: this.qualityName });
-      visual.setLights(false);
-      visual.group.position.set(x, 0.16, z);
-      visual.group.rotation.y = h;
-      this.scene.add(visual.group);
-      this.parkedCars.push({ visual, x, z, def, mods });
+      // Parked cars are scenery: use the batched body (6 draw calls instead of
+      // ~90) so the streets stay cheap to draw.
+      const batched = buildBatchedCarVisual(def, color);
+      batched.group.position.set(x, 0.16, z);
+      batched.group.rotation.y = h;
+      this.scene.add(batched.group);
+      this.parkedCars.push({ group: batched.group, batched: true, x, z, def, mods });
     }
   }
 
@@ -634,19 +639,20 @@ export class Game {
   }
 
   frame(forcedDelta) {
+    this._frameStart = typeof performance !== 'undefined' ? performance.now() : 0;
     const raw = forcedDelta != null ? forcedDelta : Math.min(this.clock.getDelta(), 0.1);
     this.time += raw;
     this.frameCount++;
     const dt = Math.min(raw, 0.05);
     if (!this.running) return;
 
-    // fps adaptation (only in the first 20 seconds, and gentle)
-    if (this.frameCount < 240 && raw > 0.001) {
+    // coarse quality fallback: only if things are really bad for a long time
+    if (this.frameCount < 600 && raw > 0.001) {
       this.fpsSamples.push(1 / raw);
-      if (this.fpsSamples.length > 60) {
+      if (this.fpsSamples.length > 120) {
         const avg = this.fpsSamples.reduce((a, b) => a + b, 0) / this.fpsSamples.length;
         this.fpsSamples.length = 0;
-        if (avg < 34 && this.engine.autoAdapt && this.qualityName === 'high') {
+        if (avg < 26 && this.engine.autoAdapt && this.qualityName === 'high') {
           this.qualityName = 'medium';
           this.settings.set('quality', 'medium');
           this.applySetting('quality', 'medium');
@@ -663,7 +669,12 @@ export class Game {
     }
     if (this.state === 'menu') this.updateMenuCamera(raw);
 
-    if (!this.headless) this.engine.render(this.env, dt);
+    if (!this.headless) {
+      this.engine.render(this.env, dt);
+      // dynamic resolution: measure the real frame time and scale the render
+      // target down when the budget slips
+      if (this.engine.adapt) this.engine.adapt(performance.now() - this._frameStart);
+    }
     this.input.endFrame();
   }
 
@@ -743,7 +754,9 @@ export class Game {
     this.city.updateLights(this.env.nightAmount, this.camera, QUALITY[this.qualityName].lampLights);
     // wet tarmac follows the weather without rebuilding any material
     this.env.applyWetness(MATS.asphalt);
+    this.traffic.camPos = this.camera.position;
     this.traffic.update(dt, this.playerInCar ? this.playerVehicle : this.player, this.getFocusPos());
+    this.peds.camPos = this.camera.position;
     this.peds.update(dt, this.playerInCar ? this.playerVehicle : this.player, this.getFocusPos());
     this.audio.updateAmbience(this.env.nightAmount);
 

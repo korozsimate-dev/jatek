@@ -536,13 +536,20 @@ ok(isFinite(game.player.x) && isFinite(game.player.z), 'player finite after soak
 step('features are wired');
 ok(game.city.colliderList.length > 100, `colliders (${game.city.colliderList.length})`);
 ok(game.env.skyUniforms.uNight.value >= 0, 'day/night uniforms live');
+// weather ramps in over a couple of seconds, so give it time to settle.
+// (The random weather cycle can also kick in mid-test, so pin it down first.)
+game.env.weatherTimer = 0;
+game.env.nextWeatherChange = 1e9;
+// make sure the world is actually simulating (a screen can be left open by an
+// earlier step, and then no frame ever reaches the environment)
+if (game.paused) game.resume();
 game.env.setWeather('rain');
-frames(90);
-ok(game.env.rainIntensity > 0.1, 'rain weather engages');
+frames(220);
+ok(game.env.rainIntensity > 0.1, 'rain weather engages', `intensity=${game.env.rainIntensity.toFixed(2)} paused=${game.paused} state=${game.state} screens=${game.screens.current} worldActive=${game.worldActive}`);
 ok(game.env.rain.visible, 'rain particles visible');
 game.env.setWeather('fog');
-frames(90);
-ok(game.env.fogDensity > 0.2, 'fog weather engages');
+frames(220);
+ok(game.env.fogDensity > 0.2, 'fog weather engages', `fog=${game.env.fogDensity.toFixed(2)}`);
 game.env.setWeather('clear');
 frames(60);
 for (const e of EVENTS) ok(game.progression.isUnlocked(e) || e.repReq > game.progression.rep, `event ${e.id} gating sane`);

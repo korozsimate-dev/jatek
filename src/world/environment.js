@@ -114,8 +114,12 @@ export class Environment {
 
     this.sun = new THREE.DirectionalLight('#fff2d8', 2.4);
     this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(4096, 4096);
-    this.sun.shadow.blurSamples = 8;
+    // 4096 = 64 MB of shadow map plus a very heavy depth pass every frame.
+    // 2048 over this tight frustum looks the same on screen and costs a quarter
+    // of the fill; the map is only rebuilt when the light actually moves.
+    this.sun.shadow.mapSize.set(2048, 2048);
+    this.sun.shadow.blurSamples = 4;
+    this.sun.shadow.autoUpdate = true;
     const sc = this.sun.shadow.camera;
     // tighter frustum = much crisper car shadows (they sit right under the camera)
     sc.left = -70; sc.right = 70; sc.top = 70; sc.bottom = -70;
@@ -173,6 +177,22 @@ export class Environment {
   }
 
   update(dt, camera) {
+    if (!this._scratch) {
+      this._scratch = {
+        sunDir: new THREE.Vector3(), moonDir: new THREE.Vector3(),
+        dayCol: new THREE.Color('#87b6e8'), duskCol: new THREE.Color('#f2803c'),
+        nightCol: new THREE.Color('#070c18'), horizonDay: new THREE.Color('#c3d9ea'),
+        horizonDusk: new THREE.Color('#e8a06a'), horizonNight: new THREE.Color('#121c2c'),
+        top: new THREE.Color(), horizon: new THREE.Color(), tmp: new THREE.Color(),
+        grey: new THREE.Color('#4a5058'), greyTop: new THREE.Color('#2a3038'),
+        sunWarm: new THREE.Color('#fff0c8'), sunDusk: new THREE.Color('#ff7a3c'),
+        sunCol: new THREE.Color('#ffe9c4'), sunColDusk: new THREE.Color('#ff9150'),
+        hemiCool: new THREE.Color('#9ac0e8'), hemiNight: new THREE.Color('#4a5872'),
+        groundDay: new THREE.Color('#4a4238'), groundNight: new THREE.Color('#2a2622'),
+        ambDay: new THREE.Color('#1c2734'), ambNight: new THREE.Color('#3a3542'),
+        camPos: new THREE.Vector3(),
+      };
+    }
     if (this.forceTime != null) {
       this.time = this.forceTime;
     } else {
@@ -207,29 +227,20 @@ export class Environment {
     const sunX = Math.cos(angle) * 0.55;
     const sunY = Math.sin(angle);
     const sunZ = -0.35;
-    const sunDir = new THREE.Vector3(sunX, sunY, sunZ).normalize();
-    const moonDir = new THREE.Vector3(-sunX, -sunY * 0.9 + 0.12, -sunZ).normalize();
+    const sc = this._scratch;
+    const sunDir = sc.sunDir.set(sunX, sunY, sunZ).normalize();
+    const moonDir = sc.moonDir.set(-sunX, -sunY * 0.9 + 0.12, -sunZ).normalize();
 
     const dayAmt = clamp(smoothstep((sunY + 0.10) * 2.4), 0, 1);
     const nightAmt = 1 - clamp(smoothstep((sunY + 0.22) * 2.6), 0, 1);
     const duskAmt = clamp(1 - Math.abs(sunY) * 4.2) * (sunY > -0.35 ? 1 : 0);
 
-    // palette
-    const dayCol = new THREE.Color('#87b6e8');
-    const duskCol = new THREE.Color('#f2803c');
-    const nightCol = new THREE.Color('#070c18');
-    const horizonDay = new THREE.Color('#c3d9ea');
-    const horizonDusk = new THREE.Color('#e8a06a');
-    const horizonNight = new THREE.Color('#121c2c');
-
-    const top = new THREE.Color().copy(nightCol).lerp(dayCol, dayAmt * 0.92);
-    if (duskAmt > 0.01) top.lerp(new THREE.Color('#2a3350'), duskAmt * 0.55);
-    const horizon = new THREE.Color().copy(horizonNight).lerp(horizonDay, dayAmt);
+    // palette (scratch colours: this runs every frame)
+    const { dayCol, nightCol, horizonDay, horizonDusk, horizonNight, grey, greyTop } = sc;
+    const top = sc.top.copy(nightCol).lerp(dayCol, dayAmt * 0.92);
+    if (duskAmt > 0.01) top.lerp(sc.tmp.set('#2a3350'), duskAmt * 0.55);
+    const horizon = sc.horizon.copy(horizonNight).lerp(horizonDay, dayAmt);
     if (duskAmt > 0.01) horizon.lerp(horizonDusk, duskAmt * 0.85);
-
-    // rain/fog desaturate and grey out the sky
-    const grey = new THREE.Color('#4a5058');
-    const greyTop = new THREE.Color('#2a3038');
     const weatherMuffle = clamp(this.fogDensity * 0.9 + this.rainIntensity * 0.7);
     top.lerp(greyTop, weatherMuffle);
     horizon.lerp(grey, weatherMuffle);
@@ -240,30 +251,41 @@ export class Environment {
     this.skyUniforms.uSunDir.value.copy(sunDir);
     this.skyUniforms.uMoonDir.value.copy(moonDir);
     this.skyUniforms.uNight.value = nightAmt;
-    this.skyUniforms.uSunColor.value.set('#fff0c8').lerp(new THREE.Color('#ff7a3c'), duskAmt * 0.9);
+    this.skyUniforms.uSunColor.value.copy(sc.sunWarm).lerp(sc.sunDusk, duskAmt * 0.9);
     this.skyUniforms.uFogAmt.value = weatherMuffle;
 
     // directional light
     const sunStrength = clamp(sunY * 3.2, 0, 1) * (1 - weatherMuffle * 0.65);
     this.sun.intensity = sunStrength * 2.9;
-    this.sun.color.set('#ffe9c4').lerp(new THREE.Color('#ff9150'), duskAmt * 0.75);
+    this.sun.color.copy(sc.sunCol).lerp(sc.sunColDusk, duskAmt * 0.75);
     this.sun.visible = sunStrength > 0.01;
     // the moon is the key light at night — without it everything is a silhouette
     this.moon.intensity = nightAmt * 1.05;
     this.moon.visible = nightAmt > 0.02;
-    const camPos = camera ? camera.position : new THREE.Vector3();
+    const camPos = camera ? camera.position : sc.camPos.set(0, 0, 0);
     this.sun.position.set(camPos.x + sunDir.x * 240, sunDir.y * 240, camPos.z + sunDir.z * 240);
     this.sun.target.position.set(camPos.x, 0, camPos.z);
+    this.sun.target.updateMatrixWorld();
+    // The shadow map only has to be rebuilt when the sun or the camera moved a
+    // meaningful distance, not every single frame.
+    const moved = this._shadowRef
+      ? Math.abs(camPos.x - this._shadowRef.x) + Math.abs(camPos.z - this._shadowRef.z)
+        + Math.abs(this.sun.position.y - this._shadowRef.y)
+      : 1e9;
+    if (moved > 2.5) {
+      this.renderer && (this.renderer.shadowMap.needsUpdate = true);
+      this._shadowRef = { x: camPos.x, y: this.sun.position.y, z: camPos.z };
+    }
     this.moon.position.set(camPos.x + moonDir.x * 200, Math.abs(moonDir.y) * 200 + 40, camPos.z + moonDir.z * 200);
     this.moon.target = this.sun.target;
 
     // Night must stay *playable*: a sodium/orange sky bounce plus a cool fill
     // keeps shapes readable even far from a street lamp.
     this.hemi.intensity = 0.34 + dayAmt * 0.52;
-    this.hemi.color.set('#9ac0e8').lerp(new THREE.Color('#4a5872'), nightAmt);
-    this.hemi.groundColor.set('#4a4238').lerp(new THREE.Color('#2a2622'), nightAmt);
+    this.hemi.color.copy(sc.hemiCool).lerp(sc.hemiNight, nightAmt);
+    this.hemi.groundColor.copy(sc.groundDay).lerp(sc.groundNight, nightAmt);
     this.ambient.intensity = 0.34 + nightAmt * 0.52;
-    this.ambient.color.set('#1c2734').lerp(new THREE.Color('#3a3542'), nightAmt);
+    this.ambient.color.copy(sc.ambDay).lerp(sc.ambNight, nightAmt);
 
     // fog
     const quality = this.settings.get('quality');

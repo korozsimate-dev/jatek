@@ -9,6 +9,8 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { QUALITY } from '../config.js';
 
+const clampNum = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
+
 const GradeShader = {
   uniforms: {
     tDiffuse: { value: null },
@@ -60,7 +62,9 @@ export class Engine {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.shadowMap.enabled = this.quality !== 'low';
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, QUALITY[this.quality].pixelRatio));
+    // A 4K screen at pixelRatio 2 renders 8x the pixels of 1080p and that alone
+    // halves the frame rate. Cap the drawing buffer instead of the ratio.
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, QUALITY[this.quality].pixelRatio, this._ratioCap()));
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(70, 1, 0.25, 1500);
@@ -73,6 +77,50 @@ export class Engine {
     this.adaptTime = 0;
     this.lowFpsStreak = 0;
     this.autoAdapt = true;
+    this.dynamicRes = true;      // lower the resolution when the frame budget slips
+    this.resScale = 1;
+    this.smoothFrameMs = 16.7;
+  }
+
+  // keep the drawing buffer inside a sane pixel budget
+  _ratioCap() {
+    const w = window.innerWidth || 1280, h = window.innerHeight || 720;
+    const budget = QUALITY[this.quality]?.pixels ?? 2.3e6;
+    const byArea = Math.sqrt(budget / Math.max(1, w * h));
+    return clampNum(byArea, 0.6, 2.0);
+  }
+
+  // Called every frame with the measured frame time. If we are consistently
+  // too slow, drop the render scale (post-processing included) in small steps;
+  // if there is headroom, creep back up. This is what stops the game from
+  // stuttering on a mid-range GPU.
+  adapt(frameMs) {
+    this.smoothFrameMs += (frameMs - this.smoothFrameMs) * 0.06;
+    if (!this.dynamicRes) return;
+    this.adaptTime += frameMs / 1000;
+    if (this.adaptTime < 0.75) return;
+    this.adaptTime = 0;
+    const ms = this.smoothFrameMs;
+    let next = this.resScale;
+    if (ms > 24 && this.resScale > 0.62) next = Math.max(0.62, this.resScale - 0.10);
+    else if (ms < 15 && this.resScale < 1) next = Math.min(1, this.resScale + 0.06);
+    if (next !== this.resScale) {
+      this.resScale = next;
+      this.applyResolution();
+    }
+  }
+
+  applyResolution() {
+    const conf = QUALITY[this.quality];
+    const base = Math.min(window.devicePixelRatio, conf.pixelRatio, this._ratioCap());
+    this.renderer.setPixelRatio(Math.max(0.6, base * this.resScale));
+    this.resize();
+    // bloom at full resolution is the single most expensive pass
+    if (this.bloom) {
+      const db = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+      this.bloom.resolution.set(db.x, db.y);
+      this.bloom.strength = this.resScale < 0.9 ? 0.45 : 0.55;
+    }
   }
 
   _setupComposer() {
@@ -96,13 +144,19 @@ export class Engine {
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h, false);
     this.composer.setSize(w, h);
-    if (this.bloom) this.bloom.resolution.set(w, h);
+    // size post-processing from the drawing buffer, not the CSS size, so a
+    // reduced render scale really does cut the pixel cost
+    if (this.bloom || this.grade) {
+      const db = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+      if (this.bloom) this.bloom.resolution.set(db.x, db.y);
+    }
   }
 
   setQuality(q) {
     this.quality = q;
     const conf = QUALITY[q];
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, conf.pixelRatio));
+    this.resScale = 1;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, conf.pixelRatio, this._ratioCap()));
     this.renderer.shadowMap.enabled = conf.shadows && this.settings.get('shadows') !== 'off';
     this.bloom.enabled = conf.bloom && this.settings.get('bloom') !== false;
     this.resize();

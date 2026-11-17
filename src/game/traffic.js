@@ -5,7 +5,7 @@
 // ============================================================
 import * as THREE from 'three';
 import { CAR_DEFS, CAR_BY_ID } from '../data/cars.js';
-import { CarVisual } from '../world/carMesh.js';
+import { buildBatchedCarVisual } from '../world/carMesh.js';
 import { buildRoadNetwork, GRID } from '../world/layout.js';
 import { RNG, clamp } from '../core/util.js';
 
@@ -19,19 +19,12 @@ export const TRAFFIC_DEFS = ['muscle_coronet', 'van_delivery', 'suv_path', 'seda
 export class TrafficCar {
   constructor(def, color, quality, network) {
     this.def = def;
-    this.visual = new CarVisual(def, {
-      paintColor: color, finish: 0, tint: 1, rims: 0, rimSize: 0,
-      frontBumper: 0, rearBumper: 0, skirts: 0, spoiler: 0, hood: 0,
-      headlights: 0, exhaustTip: 0, livery: 0, underglow: 0,
-      wheel: 0, seats: 0, dash: 0, interiorColor: 0, tires: 0,
-      engine: 0, turbo: 0, ecu: 0, intake: 0, exhaust: 0, cooling: 0,
-      gearbox: 0, clutch: 0, diff: 0, final: 0,
-      suspension: 0, ride: 0, camber: 0,
-    }, { quality });
+    // Batched body: 6 draw calls per car instead of ~24. The traffic silhouette
+    // is simple on purpose — it is scenery, and the frame budget is better
+    // spent on the player's car.
+    this.visual = buildBatchedCarVisual(def, color);
     this.group = this.visual.group;
-    // Traffic runs with its headlights on: this is what makes the streets read
-    // as lit at night without paying for 20 more spot lights.
-    this.visual.setLights(true);
+    this.wheels = this.visual.wheels;
     this.network = network;
     this.speed = 0;
     this.targetSpeed = 11;
@@ -56,10 +49,9 @@ export class TrafficCar {
 
   sync() {
     this.group.position.set(this.x, 0, this.z);
+    // model is built facing +X, heading grows counter-clockwise on X/Z
     this.group.rotation.y = this.heading;
-    // model points +X by default, so rotate so that local +X aligns with heading
-    this.group.rotation.y = this.heading;
-    this.group.rotation.y = this.heading;
+    for (const w of this.wheels) w.rotation.z = this.wheelSpin * (w.position.z >= 0 ? 1 : -1);
   }
 
   pickNext() {
@@ -135,15 +127,19 @@ export class TrafficCar {
     this.z += -Math.sin(this.heading) * this.speed * dt;
     this.wheelSpin += (this.speed / this.def.body.wheelR) * dt;
 
-    // visual
+    // distance culling: distant traffic is a few pixels and a full draw call
+    const cam = this.camPos;
+    this.group.visible = !cam || Math.hypot(this.x - cam.x, this.z - cam.z) < 190;
+    // visual: one transform write per car, wheels spun in place
     this.group.position.set(this.x, 0, this.z);
     this.group.rotation.y = this.heading;
-    this.visual.update(dt, {
-      steer: this.steer, wheelDelta: (this.speed / this.def.body.wheelR) * dt,
-      suspension: [0, 0, 0, 0], pitch: 0, roll: this.steer * 0.02,
-    });
-    // brake lights when slowing
-    this.visual.setBrake(this.speed < 2 || (want < this.speed - 0.4) ? 1 : 0);
+    const spin = this.speed / this.def.body.wheelR;
+    for (let i = 0; i < this.wheels.length; i++) {
+      const w = this.wheels[i];
+      w.rotation.z = this.wheelSpin * (w.position.z >= 0 ? 1 : -1);
+      if (i < 2) w.rotation.y = this.steer * 0.5;
+    }
+    this.group.rotation.z = this.steer * 0.02;
   }
 }
 
@@ -179,7 +175,7 @@ export class TrafficSystem {
   reset() {
     for (const c of this.cars) {
       this.group.remove(c.group);
-      c.visual.dispose();
+      c.group.userData.dispose?.();
     }
     this.cars.length = 0;
   }
@@ -200,7 +196,6 @@ export class TrafficSystem {
       const car = new TrafficCar(def, color, 'low', this.network);
       const dx = sp.next.x - x, dz = sp.next.z - z;
       car.spawnAt(x, z, Math.atan2(-dz, dx), sp.node, sp.next);
-      car.visual.setLights(true);
       this.group.add(car.group);
       this.cars.push(car);
       made++;
@@ -211,6 +206,7 @@ export class TrafficSystem {
   update(dt, player, centre) {
     if (!this.enabled) return;
     for (const car of this.cars) {
+      car.camPos = this.camPos;
       car.update(dt, player, this.cars);
       const d = Math.hypot(car.x - centre.x, car.z - centre.z);
       if (d > 340) {

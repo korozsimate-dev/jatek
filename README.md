@@ -195,3 +195,8 @@ it, and both the 3D world and the minimap read the same data.
   (low / medium / high) scale shadows, draw distance, traffic and pedestrians.
 * `test/preview.mjs` is a small software rasteriser used during development to
   check geometry without a browser; it writes PNGs into `out/`.
+
+### Kormányzás és teljesítmény
+
+- **Kormányzás:** a kocsi a kormány állását követi (kinematikai cél-yaw + stabilitásvezérlés). Nagy sebességnél is marad használható kormányút, ellenkormányzásra azonnal visszafordul, normál kanyarban nem csúszik ki. A kézifék (Space) továbbra is szándékos driftet indít.
+- **Teljesítmény:** a forgalom és a parkoló autók egyetlen csoportosított mesh-be kerültek (autónként ~6 draw call a ~90 helyett), a gyalogosok és a távoli forgalom távolság alapján culled, az árnyéktérkép 2048 és csak akkor épül újra, ha a nap/kamera tényleg mozdult. A renderelés dinamikusan csökkenti a felbontást, ha a frame time 24 ms fölé megy.

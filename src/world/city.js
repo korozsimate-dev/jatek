@@ -997,9 +997,13 @@ export class City {
     }
     // nearest lamps
     const n = qualityLampCount;
-    if (!this._lampSorted || this._lampFrame++ % 12 === 0) {
-      this._lampFrame = 1;
-      const arr = [];
+    // re-pick the nearest lamps a few times a second (this sort is the most
+    // expensive thing the city does per frame, and it used to allocate a fresh
+    // array every time)
+    this._lampFrame = (this._lampFrame || 0) + 1;
+    if (!this._lampSorted || this._lampFrame % 12 === 0) {
+      const arr = this._lampScratch || (this._lampScratch = []);
+      arr.length = 0;
       const lamps = this.lampPositions;
       const step = Math.max(1, Math.floor(lamps.length / 220));
       for (let i = 0; i < lamps.length; i += step) {

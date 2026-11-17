@@ -30,8 +30,11 @@ export const DRIVE_CONFIG = {
 // and then saturates into a tank-slapper.
 export function steeringLockAt(speed, assists = true) {
   const v = Math.abs(speed);
-  const sf = 1 / (1 + v * 0.075);
-  return (0.50 * sf + 0.055) * (assists ? 1 : 1.12);
+  // A gentle falloff, with a floor high enough that the wheel still does
+  // something at motorway speed. The old curve left ~3 degrees of lock at
+  // 140 km/h, which felt like the steering had died.
+  const sf = 1 / (1 + v * 0.030);
+  return (0.46 * sf + 0.085) * (assists ? 1 : 1.15);
 }
 
 export class Vehicle {
@@ -223,10 +226,12 @@ export class Vehicle {
     const muBase = 0.92 + (P.grip - 0.5) * 1.45; // 0.5 -> ~0.92, 0.9 -> ~1.5
     const muF = muBase * (1 + P.camber * -0.55);
     let muR = muBase * 0.995;
-    if (hbIn > 0.05) muR *= (1 - 0.68 * hbIn);
+    // Handbrake: the rear tyres are locked, so their lateral capacity collapses.
+    // This is what makes a pulled handbrake break the back away.
+    if (hbIn > 0.05) muR *= (1 - 0.90 * hbIn);
     // power oversteer for RWD/AWD when spinning up (kept mild: it used to
     // stack with the rear grip loss and made every launch a spin)
-    if (wheelspin > 0.35) muR *= (1 - 0.20 * Math.min(1, wheelspin));
+    if (wheelspin > 0.35) muR *= (1 - 0.18 * Math.min(1, wheelspin));
     const surfaceGrip = world?.surfaceGrip ? world.surfaceGrip(this.x, this.z) : 1;
     const muFW = muF * surfaceGrip;
     const muRW = muR * surfaceGrip;
@@ -235,10 +240,15 @@ export class Vehicle {
     const alphaF = Math.atan2(vfLat, speedDen) - this.steerAngle;
     const alphaR = Math.atan2(vrLat, speedDen);
 
-    // Softer cornering stiffness + a gentler saturation curve. The hard
-    // clamp made the tyres snap into full slide at ~5 deg of slip angle.
-    const stiffF = 7.6, stiffR = 8.4;
-    const sat = (x) => { const a = Math.abs(x); return Math.sign(x) * (a > 1 ? 1 : a * (2 - a)); };
+    // Tyre curve: a mild degressive shape (peaks at ~1 and falls off slowly)
+    // instead of a hard saturation. The hard clamp made the tyres go from
+    // "gripping" to "fully sliding" with no warning in between.
+    const stiffF = 8.2, stiffR = 9.0;
+    const sat = (x) => {
+      const a = Math.abs(x);
+      const shaped = a <= 1 ? a * (2 - a) : 1 - Math.min(0.22, (a - 1) * 0.09);
+      return Math.sign(x) * shaped;
+    };
     let fyF = -sat(alphaF * stiffF) * muFW * loadFc;
     let fyR = -sat(alphaR * stiffR) * muRW * loadRc;
 
@@ -250,39 +260,80 @@ export class Vehicle {
     const dvLat = (fyF * Math.cos(this.steerAngle) + fyR) / P.mass;
     vLong += dvLong * dt;
     vLat += dvLat * dt;
-    // scrubbing: lateral velocity decays (tyre drag), more aggressively when gripping
-    // Lateral scrub: grip scrubs sideways speed fast, a slide keeps momentum.
-    // (Was 3.2 while gripping, which killed the car's speed mid-corner.)
-    const scrub = this.drifting ? 1.1 : 2.0;
-    vLat *= Math.exp(-dt * scrub);
 
     // yaw dynamics
     const izz = P.mass * (wheelbase * wheelbase) * 0.115 + P.mass * (trackW * trackW) * 0.02;
     const torqueYaw = a * fyF * Math.cos(this.steerAngle) - b * fyR;
     let yawAccel = torqueYaw / izz;
-    // handbrake kick: the rear steps out
-    if (hbIn > 0.2 && absV > 4) {
-      const dir = Math.sign(this.steerAngle) || Math.sign(vLat) || 1;
-      yawAccel += dir * hbIn * 3.0 * clamp(absV / 18, 0, 1.2);
-    }
-    // --- stability control ------------------------------------------------
-    // Two jobs: damp the yaw so the car does not oscillate, and pull the nose
-    // back towards the direction of travel when the rear starts to let go.
-    yawAccel -= yawRate * 2.4;
-    const slip = Math.atan2(vLat, Math.max(0.5, Math.abs(vLong)));
+
+    // ------------------------------------------------------------------
+    // Stability control / yaw tracking.
+    //
+    // The car used to be a pure "tyre forces -> yaw" model: cornering built up
+    // slip, the slip damping then fought the steering, and counter-steering
+    // never brought the nose back around — you just drifted until you crashed.
+    //
+    // Now the yaw follows a *target* that comes straight from the steering
+    // angle (kinematic bicycle): the car goes where you point it, and the
+    // difference is corrected by the tyres. Slip beyond the grip limit is
+    // still possible on purpose (handbrake, or too much speed into a corner),
+    // but a normal corner is stable and the wheel always answers both ways.
+    // ------------------------------------------------------------------
+    const measuredSlip = Math.atan2(vLat, Math.max(0.5, Math.abs(vLong)));
+    const slipYaw = Math.atan2(vLat, Math.max(1.2, absV));   // angle of travel vs. nose
+    const yawTarget = (vLong / Math.max(1.0, wheelbase)) * Math.tan(this.steerAngle);
+    const gripLat = muBase * g * surfaceGrip;
+    // With assists, never ask the car for more cornering than the tyres can
+    // deliver: the excess becomes a wide line (understeer), not a spin. This
+    // is what stops "every corner turns into a drift".
+    // handbrake lowers the rear grip, so the yaw budget has to shrink with it;
+    // that is what lets a deliberate handbrake turn actually break the rear free
+    // full lock at speed should push the car wide / into a controllable
+    // slide, not swap ends: keep the steering-driven yaw budget sane
+    const lockFatigue = 1 - clamp((Math.abs(steerIn) - 0.75) * 1.6, 0, 0.45);
+    const gripBudget = 1.12 * lockFatigue * (1 - 0.62 * hbIn);
+    const yawGripLimit = (gripLat * gripBudget) / Math.max(4.5, absV);
+    const yawCap = clamp(yawGripLimit, 0.35, 2.6) * (this.assists ? 1 : 2.0);
+    const yawWanted = clamp(yawTarget, -yawCap, yawCap);
+
+    // how much of the target we may actually use before the tyres give up
+    const latDemand = Math.abs(yawWanted * vLong);
+    const gripUse = clamp(latDemand / Math.max(1, gripLat), 0, 2.2);
+
     if (this.assists) {
-      // counter-steer assist: a real driver would do this; without it any
-      // slide turns into a spin once the slip passes ~20 deg
-      const recover = clamp((Math.abs(slip) - 0.16) * 2.4, 0, 1);
-      yawAccel -= Math.sign(slip) * recover * Math.abs(vLong) * 0.34;
-      // and dump some of the lateral speed so a slide scrubs off instead of
-      // spinning the car (this is what "the car keeps sliding out" feels like)
-      vLat *= Math.exp(-dt * recover * 2.6);
-    } else if (Math.abs(slip) > 0.22 && throttle > 0.35) {
-      yawAccel += Math.sign(slip) * 0.9;
+      // follow the steering: fast, but with a little lag so it feels weighty
+      // the handbrake loosens the controller: the tail is allowed to lead
+      const follow = 7.0 * (1 - 0.72 * hbIn);
+      yawAccel += (yawWanted - yawRate) * follow;
+      // the further past the grip limit we are, the more the tyres fade out
+      const overGrip = clamp(gripUse - 0.92, 0, 1);
+      yawAccel *= 1 - overGrip * 0.55;
+      // when the nose is thrown off the line of travel, steer it back: this is
+      // the "counter-steer answers immediately" part
+      // (hold off while the handbrake is down: a pulled handbrake should slide)
+      const recover = clamp((Math.abs(slipYaw) - hbIn * 0.05 - 0.34) * 1.5, 0, 1) * (1 - 0.75 * hbIn);
+      yawAccel -= Math.sign(slipYaw) * recover * Math.abs(vLong) * 0.30;
+      // and scrub sideways speed so a slide ends instead of living forever
+      vLat *= Math.exp(-dt * (1.35 + recover * 3.4) * (1 - 0.75 * hbIn));
+    } else {
+      // no assists: raw tyre-driven yaw with light damping
+      yawAccel -= yawRate * 1.6;
+      vLat *= Math.exp(-dt * 1.5);
     }
-    this.yawRate = clamp(yawRate + yawAccel * dt, -3.2, 3.2);
-    if (absV < 1.2) this.yawRate *= 0.55;
+
+    // handbrake kick: the rear steps out (deliberate drifting stays available).
+    // The direction comes from the steering, so a pulled handbrake with the
+    // wheel turned always swings the tail that way.
+    if (hbIn > 0.1 && absV > 3) {
+      const dir = Math.sign(this.steerAngle) || Math.sign(vLat) || 1;
+      yawAccel += dir * hbIn * 4.8 * clamp(absV / 16, 0, 1.15);
+    }
+
+    // The rate cap has to be wider than the cornering cap, otherwise the
+    // stability controller clips the yaw before its own limit can act (which
+    // is why the handbrake did nothing at speed).
+    this.yawRate = clamp(yawRate + yawAccel * dt, -5.0, 5.0);
+    if (absV < 1.2) this.yawRate *= 0.6;
 
     // --- rotate velocity into the world frame with the OLD heading ---
     this.vx = vLong * cosH + vLat * sinH;
@@ -300,7 +351,9 @@ export class Vehicle {
     this.lateralSpeed = vLat;
     this.speed = Math.hypot(vLong, vLat);
     const wasDrifting = this.drifting;
-    this.drifting = Math.abs(this.slipAngle) > 0.16 && this.speed > 7;
+    // "drifting" should mean a real, visible slide (smoke, drift score), not
+    // the small slip angle any car carries through a hard corner.
+    this.drifting = Math.abs(this.slipAngle) > 0.30 && this.speed > 9;
     if (this.drifting && !wasDrifting) this.events.driftStart = 1;
     if (this.drifting) this.driftTime += dt; else this.driftTime = 0;
 

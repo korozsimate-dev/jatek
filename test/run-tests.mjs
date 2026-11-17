@@ -208,6 +208,106 @@ const ms = performance.now() - t0;
 ok(ms < 400, `6000 physics steps in ${ms.toFixed(0)}ms`);
 
 // ------------------------------------------------------------
+// ------------------------------------------------------------
+section('steering response');
+// The car must answer the wheel in BOTH directions, at speed, without
+// spinning: this is the "it drifts and never comes back the other way" bug.
+{
+  const def = CAR_BY_ID['coupe_zen'];
+  const make = () => {
+    const v = new Vehicle(def, defaultMods(def), { transmission: 'auto', assists: true });
+    v.reset(0, 0, 0);
+    for (let i = 0; i < 600; i++) v.update(1 / 60, { throttle: 1, brake: 0, steer: 0, handbrake: 0 }, null);
+    return v;
+  };
+  // 1. a normal corner stays a corner: no slide, speed kept
+  {
+    const v = make();
+    const entry = v.speedKmh;
+    let maxSlip = 0;
+    for (let i = 0; i < 240; i++) {
+      v.update(1 / 60, { throttle: 0.4, brake: 0, steer: 0.3, handbrake: 0 }, null);
+      maxSlip = Math.max(maxSlip, Math.abs(v.slipAngle));
+    }
+    ok(maxSlip < 0.28, `a 0.3 steering input at ${entry.toFixed(0)} km/h does not slide (slip ${maxSlip.toFixed(2)} rad)`);
+    ok(v.speedKmh > entry * 0.6, `the car keeps its speed through a normal corner (${entry.toFixed(0)} -> ${v.speedKmh.toFixed(0)} km/h)`);
+    ok(v.drifting === false, 'a normal corner is not flagged as a drift');
+  }
+  // 2. counter-steering actually turns the other way
+  {
+    const v = make();
+    let h0 = v.heading;
+    for (let i = 0; i < 90; i++) v.update(1 / 60, { throttle: 0.4, brake: 0, steer: 0.6, handbrake: 0 }, null);
+    const h1 = v.heading;
+    for (let i = 0; i < 120; i++) v.update(1 / 60, { throttle: 0.4, brake: 0, steer: -0.6, handbrake: 0 }, null);
+    const h2 = v.heading;
+    const turn = wrapAngle(h1 - h0);
+    const counter = wrapAngle(h2 - h1);
+    ok(turn < -0.3, `steering right turns the car right (${turn.toFixed(2)} rad)`);
+    ok(counter > 0.25, `counter-steering turns the car back the other way (${counter.toFixed(2)} rad)`);
+    ok(Math.abs(v.slipAngle) < 0.45, `counter-steering recovers the slide (slip ${v.slipAngle.toFixed(2)} rad)`);
+  }
+  // 3. the steering wheel does something at motorway speed
+  {
+    const v = make();
+    for (let i = 0; i < 200; i++) v.update(1 / 60, { throttle: 1, brake: 0, steer: 0, handbrake: 0 }, null);
+    const kmh = v.speedKmh;
+    const h0 = v.heading;
+    for (let i = 0; i < 90; i++) v.update(1 / 60, { throttle: 0.3, brake: 0, steer: 0.5, handbrake: 0 }, null);
+    const dh = Math.abs(wrapAngle(v.heading - h0));
+    ok(dh > 0.15, `the wheel still turns the car at ${kmh.toFixed(0)} km/h (${dh.toFixed(2)} rad in 1.5 s)`);
+    ok(Math.abs(v.slipAngle) < 0.4, `...without sliding out (slip ${Math.abs(v.slipAngle).toFixed(2)} rad)`);
+  }
+  // 4. a pulled handbrake DOES slide (drifting stays available on purpose)
+  {
+    const v = make();
+    let maxSlip = 0;
+    for (let i = 0; i < 90; i++) {
+      v.update(1 / 60, { throttle: 0.8, brake: 0, steer: 0.6, handbrake: 1 }, null);
+      maxSlip = Math.max(maxSlip, Math.abs(v.slipAngle));
+    }
+    ok(maxSlip > 0.3, `the handbrake still breaks the rear loose (slip ${maxSlip.toFixed(2)} rad)`);
+  }
+  // 4b. a lightning-fast handbrake flick still drifts, but counter-steering
+  //     recovers it within a second (this is the reported "never comes back")
+  {
+    const v = make();
+    for (let i = 0; i < 48; i++) v.update(1 / 60, { throttle: 0.6, brake: 0, steer: 1, handbrake: 1 }, null);
+    const flick = Math.abs(v.slipAngle);
+    for (let i = 0; i < 60; i++) v.update(1 / 60, { throttle: 0.6, brake: 0, steer: -0.6, handbrake: 0 }, null);
+    ok(flick > 0.5, `a handbrake flick throws the car sideways (slip ${flick.toFixed(2)} rad)`);
+    ok(Math.abs(v.slipAngle) < 0.3, `counter-steering recovers the flick (slip ${v.slipAngle.toFixed(2)} rad)`);
+  }
+  // 4c. a long handbrake turn is a drift, not a spin
+  {
+    const v = make();
+    let prev = v.heading, cum = 0, spins = 0;
+    for (let i = 0; i < 300; i++) {
+      v.update(1 / 60, { throttle: 0.85, brake: 0, steer: 0.55, handbrake: 0.35 }, null);
+      const dh = Math.atan2(Math.sin(v.heading - prev), Math.cos(v.heading - prev));
+      prev = v.heading;
+      cum += dh;
+      if (Math.abs(cum) > Math.PI * 1.8) { spins++; cum = 0; }
+    }
+    ok(spins === 0, `a held handbrake slide does not spin the car (${spins} spins)`);
+  }
+
+  // 5. an S-bend is followed without accumulating a slide
+  {
+    const v = make();
+    let maxSlip = 0;
+    for (let k = 0; k < 4; k++) {
+      const steer = k % 2 === 0 ? 0.5 : -0.5;
+      for (let i = 0; i < 60; i++) {
+        v.update(1 / 60, { throttle: 0.35, brake: 0, steer, handbrake: 0 }, null);
+        maxSlip = Math.max(maxSlip, Math.abs(v.slipAngle));
+      }
+    }
+    ok(maxSlip < 0.35, `an S-bend does not build up a slide (max slip ${maxSlip.toFixed(2)} rad)`);
+    ok(v.speedKmh > 40, `the car keeps rolling through the S-bend (${v.speedKmh.toFixed(0)} km/h)`);
+  }
+}
+
 section('car mesh construction');
 for (const d of CAR_DEFS) {
   const visual = new CarVisual(d, defaultMods(d), { quality: 'medium' });
