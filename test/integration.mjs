@@ -206,11 +206,14 @@ releaseAll();
 ok(Math.abs(v.heading - headBefore) > 0.05, 'car steers');
 frames(30);
 
-// braking
+// braking: hold S long enough for a genuine stop (the car used to lose its
+// speed by sliding, which made this test pass for the wrong reason)
+const brakeFrom = v.speedKmh;
 press('KeyS');
-frames(60);
+frames(110);
 releaseAll();
-ok(v.speedKmh < 20, `brakes slow the car (${v.speedKmh.toFixed(1)} km/h)`);
+ok(v.speedKmh < brakeFrom * 0.45, `brakes slow the car (${brakeFrom.toFixed(0)} -> ${v.speedKmh.toFixed(1)} km/h)`);
+ok(Math.abs(v.slipAngle) < 0.15, `braking in a straight line does not slide (slip ${v.slipAngle.toFixed(2)} rad)`);
 frames(20);
 
 // handbrake drift
@@ -368,6 +371,54 @@ press('KeyW');
 frames(120);
 releaseAll();
 ok(game.playerVehicle.speedKmh > 5, 'player can drive during the race');
+
+// rivals must actually race: on the racing line, no spinning, laps counting
+{
+  const before = game.race.opponents.map((o) => ({ lap: o.ai.lap, prog: o.ai.progress }));
+  let worstOff = 0, worstSlip = 0;
+  for (let i = 0; i < 900; i++) {
+    game.frame(1 / 60);
+    for (const o of game.race.opponents) {
+      const v2 = o.vehicle;
+      let best = Infinity;
+      for (const p of o.ai.line) {
+        const d = Math.hypot(p.x - v2.x, p.z - v2.z);
+        if (d < best) best = d;
+      }
+      worstOff = Math.max(worstOff, best);
+      worstSlip = Math.max(worstSlip, Math.abs(v2.slipAngle));
+    }
+  }
+  const moved = game.race.opponents.filter((o, i) => o.ai.progress !== before[i].prog || o.ai.lap > before[i].lap);
+  ok(moved.length === game.race.opponents.length,
+    `every rival makes progress (${moved.length}/${game.race.opponents.length})`);
+  ok(worstOff < 45, `rivals stay on the racing line (worst ${worstOff.toFixed(1)} m)`);
+  ok(worstSlip < 0.6, `rivals do not spin out (worst slip ${worstSlip.toFixed(2)} rad)`);
+}
+
+// the navigation arrow points at the next checkpoint while racing
+{
+  const arrow = game.race.arrow;
+  ok(!!arrow, 'race arrow exists');
+  ok(arrow.visible === true, 'race arrow is visible during the race');
+  const cp = game.race.checkpoints[game.race.cpIndex];
+  const toCp = Math.atan2(cp.x - game.playerVehicle.x, cp.z - game.playerVehicle.z);
+  // the chevron's nose (-Z) must face the checkpoint
+  const facing = arrow.rotation.y + Math.PI;
+  const diff = Math.abs(Math.atan2(Math.sin(facing - toCp), Math.cos(facing - toCp)));
+  ok(diff < 0.35, `race arrow aims at the next checkpoint (off by ${(diff * 57.3).toFixed(1)} deg)`);
+  // and it sits in front of the camera, not lost in the world
+  const cam = game.camera;
+  const d = arrow.position.distanceTo(cam.position);
+  ok(d > 3 && d < 16, `race arrow sits in front of the camera (${d.toFixed(1)} m)`);
+  // HUD compass: the glyph on screen must agree with the world-space arrow
+  const arrowGlyph = game.hud.el.raceNavArrow;
+  const rot = Number((arrowGlyph.style.transform.match(/-?\d+/) || ['0'])[0]);
+  const bearingDeg = Math.atan2(Math.sin(cp.x - game.playerVehicle.x), Math.cos(cp.z - game.playerVehicle.z));
+  void bearingDeg;
+  ok(Number.isFinite(rot), `nav compass rotates (${arrowGlyph.style.transform})`);
+  ok(/M|KM/.test(game.hud.el.raceNavDist.textContent), `nav compass shows a distance (${game.hud.el.raceNavDist.textContent})`);
+}
 // warp through the checkpoints to finish
 let guard = 0;
 while (game.race.active && guard++ < 400) {

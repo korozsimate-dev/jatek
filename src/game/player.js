@@ -62,7 +62,7 @@ export class Player {
     // hair
     head.add(mkBox(0.26, 0.10, 0.26, jacketMat, 0, 0.25, 0));
     // sunglasses
-    head.add(mkBox(0.03, 0.05, 0.25, shoeMat, 0.12, 0.14, 0));
+    head.add(mkBox(0.25, 0.05, 0.03, shoeMat, 0, 0.14, 0.12));
     torso.add(head);
     // arms
     const mkArm = (sgn) => {
@@ -88,8 +88,8 @@ export class Player {
       pivot.add(thigh);
       const shin = new THREE.Group(); shin.position.y = -0.44;
       shin.add(mkBox(0.145, 0.42, 0.16, pantsMat, 0, -0.21, 0));
-      // toes point along +X: that is the direction the rig walks in
-      const foot = mkBox(0.30, 0.11, 0.16, shoeMat, 0.07, -0.46, 0);
+      // toes point along +Z: the direction the rig walks in
+      const foot = mkBox(0.16, 0.11, 0.30, shoeMat, 0, -0.46, 0.07);
       shin.add(foot);
       pivot.add(shin);
       return { pivot, shin };
@@ -104,9 +104,15 @@ export class Player {
     this.rig.add(hips);
   }
 
-  // World-space heading for a direction vector: the rig faces (cos h, -sin h).
+  // The rig is modelled facing +Z (shoulders span X), so with rotation.y = h
+  // its facing vector is (sin h, cos h).
   static headingFor(dx, dz) {
-    return Math.atan2(-dz, dx);
+    return Math.atan2(dx, dz);
+  }
+
+  // A vehicle heading points along (cos h, -sin h); convert it to a rig heading.
+  static fromVehicleHeading(carHeading) {
+    return carHeading + Math.PI / 2;
   }
 
   place(x, z, heading) {
@@ -140,17 +146,18 @@ export class Player {
       let d = targetHeading - this.heading;
       while (d > Math.PI) d -= Math.PI * 2;
       while (d < -Math.PI) d += Math.PI * 2;
-      // Snap the facing to the movement direction: a slow turn makes the body
-      // slide sideways (and read as "walking backwards") for half a second.
-      this.heading += d * Math.min(1, dt * 20);
+      // Turn towards the movement direction at a capped angular rate, so the
+      // body never crabs sideways and never snaps jarringly either.
+      const maxTurn = 12 * dt;
+      this.heading += clamp(d, -maxTurn, maxTurn);
       // remember the turn rate so the torso can lean into it
       this.anim.turn = clamp(d * 2.2, -1, 1);
     } else {
       this.anim.turn *= 0.85;
     }
     const step = this.speed * dt;
-    this.x += Math.cos(this.heading) * step;
-    this.z += -Math.sin(this.heading) * step;
+    this.x += Math.sin(this.heading) * step;
+    this.z += Math.cos(this.heading) * step;
 
     // collide with city
     const r = this.radius;
@@ -170,18 +177,18 @@ export class Player {
     const amp = Math.min(1, this.speed / 2.2) * (0.35 + this.anim.run * 0.65);
     const s = Math.sin(this.anim.phase * 2);
     const s2 = Math.sin(this.anim.phase * 2 + Math.PI);
-    // limbs swing about Z, which is the axis that moves them along the walking
-    // direction (X). A rotation around X would splay the legs sideways.
-    this.legL.pivot.rotation.z = -s * 0.72 * amp;
-    this.legR.pivot.rotation.z = -s2 * 0.72 * amp;
-    this.legL.shin.rotation.z = -Math.max(0, -s) * 0.9 * amp;
-    this.legR.shin.rotation.z = -Math.max(0, -s2) * 0.9 * amp;
-    this.armL.rotation.z = -s2 * 0.60 * amp;
-    this.armR.rotation.z = -s * 0.60 * amp;
-    this.torso.rotation.z = -s * 0.06 * amp;
+    // The rig faces +Z, so a stride swings the limbs about X (the shoulder /
+    // hip axis) and the body banks about Z when turning.
+    this.legL.pivot.rotation.x = s * 0.72 * amp;
+    this.legR.pivot.rotation.x = s2 * 0.72 * amp;
+    this.legL.shin.rotation.x = Math.max(0, s) * 0.9 * amp;
+    this.legR.shin.rotation.x = Math.max(0, s2) * 0.9 * amp;
+    this.armL.rotation.x = s2 * 0.60 * amp;
+    this.armR.rotation.x = s * 0.60 * amp;
+    this.torso.rotation.x = s * 0.05 * amp;
     // bank into turns so direction changes read clearly
-    this.torso.rotation.x = (this.anim.turn || 0) * 0.20 * amp;
-    this.hips.rotation.x = (this.anim.turn || 0) * 0.10 * amp;
+    this.torso.rotation.z = -(this.anim.turn || 0) * 0.20 * amp;
+    this.hips.rotation.z = -(this.anim.turn || 0) * 0.10 * amp;
     this.hips.position.y = 0.92 + Math.abs(Math.sin(this.anim.phase * 2)) * 0.035 * amp;
     // idle breathing
     if (amp < 0.1) {

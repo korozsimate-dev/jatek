@@ -25,6 +25,15 @@ export const DRIVE_CONFIG = {
   engineBrake: 0.16,
 };
 
+// How much of full lock is available at a given forward speed. The AI uses the
+// same curve as the player so it never asks for an impossible steering angle
+// and then saturates into a tank-slapper.
+export function steeringLockAt(speed, assists = true) {
+  const v = Math.abs(speed);
+  const sf = 1 / (1 + v * 0.075);
+  return (0.50 * sf + 0.055) * (assists ? 1 : 1.12);
+}
+
 export class Vehicle {
   constructor(def, mods, opts = {}) {
     this.def = def;
@@ -123,8 +132,10 @@ export class Vehicle {
     this.throttleAmount = Math.abs(throttle);
 
     // --- steering: speed sensitive, smoothed ---
-    const speedFactor = 1 / (1 + Math.abs(vLong) * 0.045);
-    const maxSteerNow = 0.58 * speedFactor + 0.07;
+    // Steering locks off faster than before: 0.045 left the car with almost full
+    // lock at 100 km/h, which is what made it swap ends on every input.
+    const speedFactor = 1 / (1 + Math.abs(vLong) * 0.075);
+    const maxSteerNow = steeringLockAt(vLong, this.assists);
     // Sign convention: +steerAngle turns the car LEFT, because heading grows
     // counter-clockwise on the X/Z plane (forward = (cos h, -sin h)).
     // steerIn is +1 for "right" (D), so it is negated here.
@@ -213,8 +224,9 @@ export class Vehicle {
     const muF = muBase * (1 + P.camber * -0.55);
     let muR = muBase * 0.995;
     if (hbIn > 0.05) muR *= (1 - 0.68 * hbIn);
-    // power oversteer for RWD/AWD when spinning up
-    if (wheelspin > 0.35) muR *= (1 - 0.34 * Math.min(1, wheelspin));
+    // power oversteer for RWD/AWD when spinning up (kept mild: it used to
+    // stack with the rear grip loss and made every launch a spin)
+    if (wheelspin > 0.35) muR *= (1 - 0.20 * Math.min(1, wheelspin));
     const surfaceGrip = world?.surfaceGrip ? world.surfaceGrip(this.x, this.z) : 1;
     const muFW = muF * surfaceGrip;
     const muRW = muR * surfaceGrip;
@@ -223,9 +235,12 @@ export class Vehicle {
     const alphaF = Math.atan2(vfLat, speedDen) - this.steerAngle;
     const alphaR = Math.atan2(vrLat, speedDen);
 
-    const stiffF = 10.5, stiffR = 11.5;
-    let fyF = -clamp(alphaF * stiffF, -1, 1) * muFW * loadFc;
-    let fyR = -clamp(alphaR * stiffR, -1, 1) * muRW * loadRc;
+    // Softer cornering stiffness + a gentler saturation curve. The hard
+    // clamp made the tyres snap into full slide at ~5 deg of slip angle.
+    const stiffF = 7.6, stiffR = 8.4;
+    const sat = (x) => { const a = Math.abs(x); return Math.sign(x) * (a > 1 ? 1 : a * (2 - a)); };
+    let fyF = -sat(alphaF * stiffF) * muFW * loadFc;
+    let fyR = -sat(alphaR * stiffR) * muRW * loadRc;
 
     // low speed: fade forces to avoid jitter while parked
     if (absV < 0.8) { fyF *= absV / 0.8; fyR *= absV / 0.8; }
@@ -236,7 +251,9 @@ export class Vehicle {
     vLong += dvLong * dt;
     vLat += dvLat * dt;
     // scrubbing: lateral velocity decays (tyre drag), more aggressively when gripping
-    const scrub = this.drifting ? 0.9 : 3.2;
+    // Lateral scrub: grip scrubs sideways speed fast, a slide keeps momentum.
+    // (Was 3.2 while gripping, which killed the car's speed mid-corner.)
+    const scrub = this.drifting ? 1.1 : 2.0;
     vLat *= Math.exp(-dt * scrub);
 
     // yaw dynamics
@@ -246,14 +263,25 @@ export class Vehicle {
     // handbrake kick: the rear steps out
     if (hbIn > 0.2 && absV > 4) {
       const dir = Math.sign(this.steerAngle) || Math.sign(vLat) || 1;
-      yawAccel += dir * hbIn * 4.6 * clamp(absV / 18, 0, 1.5);
+      yawAccel += dir * hbIn * 3.0 * clamp(absV / 18, 0, 1.2);
     }
-    // stability: self-aligning damping plus a gentle yaw boost while powering out of a slide
-    yawAccel -= yawRate * 1.7;
-    if (this.assists && Math.abs(this.slipAngle) > 0.22 && throttle > 0.35) {
-      yawAccel += Math.sign(this.slipAngle) * 0.9;
+    // --- stability control ------------------------------------------------
+    // Two jobs: damp the yaw so the car does not oscillate, and pull the nose
+    // back towards the direction of travel when the rear starts to let go.
+    yawAccel -= yawRate * 2.4;
+    const slip = Math.atan2(vLat, Math.max(0.5, Math.abs(vLong)));
+    if (this.assists) {
+      // counter-steer assist: a real driver would do this; without it any
+      // slide turns into a spin once the slip passes ~20 deg
+      const recover = clamp((Math.abs(slip) - 0.16) * 2.4, 0, 1);
+      yawAccel -= Math.sign(slip) * recover * Math.abs(vLong) * 0.34;
+      // and dump some of the lateral speed so a slide scrubs off instead of
+      // spinning the car (this is what "the car keeps sliding out" feels like)
+      vLat *= Math.exp(-dt * recover * 2.6);
+    } else if (Math.abs(slip) > 0.22 && throttle > 0.35) {
+      yawAccel += Math.sign(slip) * 0.9;
     }
-    this.yawRate = clamp(yawRate + yawAccel * dt, -3.6, 3.6);
+    this.yawRate = clamp(yawRate + yawAccel * dt, -3.2, 3.2);
     if (absV < 1.2) this.yawRate *= 0.55;
 
     // --- rotate velocity into the world frame with the OLD heading ---

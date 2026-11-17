@@ -21,6 +21,7 @@ export class Hud {
       toasts: $('toasts'), countdown: $('countdown'), centerMsg: $('center-msg'),
       raceBanner: $('race-banner'), raceName: $('race-name'), racePos: $('race-pos'),
       raceLap: $('race-lap'), raceTime: $('race-time'), objective: $('objective'),
+      raceNavArrow: $('race-nav-arrow'), raceNavDist: $('race-nav-dist'),
       drift: $('drift-meter'), driftScore: $('drift-score'), driftMult: $('drift-mult'),
       stars: document.querySelectorAll('.wstar'),
       bigmap: $('bigmap'), damageFlash: $('damage-flash'),
@@ -191,6 +192,19 @@ export class Hud {
     this.el.raceBanner.classList.add('hidden');
     this.el.countdown.classList.add('hidden');
     this.el.drift.classList.add('hidden');
+  }
+  // bearing = radians, 0 = straight ahead, + = turn left
+  updateNav(bearing, distance) {
+    if (this.el.raceNavArrow) {
+      // ▲ points up at zero; positive bearing (left) rotates counter-clockwise
+      this.el.raceNavArrow.style.transform = `rotate(${(-bearing * 180 / Math.PI).toFixed(0)}deg)`;
+      this.el.raceNavArrow.classList.toggle('behind', Math.abs(bearing) > 2.2);
+    }
+    if (this.el.raceNavDist) {
+      const d = Math.max(0, Math.round(distance));
+      const txt = d >= 1000 ? `${(d / 1000).toFixed(1)} KM` : `${d} M`;
+      if (this.el.raceNavDist.textContent !== txt) this.el.raceNavDist.textContent = txt;
+    }
   }
   updateRace({ timer, position, lap, totalLaps }) {
     const t = Math.round(timer * 100);

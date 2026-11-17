@@ -5,11 +5,49 @@ import * as THREE from 'three';
 import { CAR_BY_ID, CAR_DEFS, computeStats, defaultMods } from '../data/cars.js';
 import { Vehicle } from '../physics/vehicle.js';
 import { CarVisual } from '../world/carMesh.js';
-import { AIDriver, densifyPath, pathProgress } from './aiDriver.js';
+import { AIDriver, densifyPath } from './aiDriver.js';
 import { clamp, formatTime, ordinal, RNG } from '../core/util.js';
 
 const RIVAL_POOL = ['coupe_zen', 'coupe_slide', 'sedan_evo', 'drift_nagata', 'exotic_aoi', 'sedan_kessler', 'muscle_stallion', 'hatch_walden', 'sport_milano', 'muscle_vanguard'];
 const RIVAL_COLORS = ['#c8202c', '#1c3f8f', '#e0c72a', '#f2f4f6', '#191919', '#28b7a8', '#5c2d7a', '#d04a86'];
+
+
+// A big floating chevron that points at the next checkpoint. It is parented to
+// the scene but repositioned in front of the camera every frame, so it reads
+// like a navigation HUD arrow that also exists in the world.
+function directionArrow() {
+  const g = new THREE.Group();
+  // always on top: it is a navigation aid, so a building or a rival must never
+  // hide it
+  const mat = new THREE.MeshBasicMaterial({
+    color: '#37e0c8', transparent: true, opacity: 0.92, toneMapped: false,
+    depthWrite: false, depthTest: false, side: THREE.DoubleSide,
+  });
+  // chevron: two angled slabs forming an arrow head
+  for (const sgn of [1, -1]) {
+    const geo = new THREE.BoxGeometry(1.15, 0.16, 0.42);
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(sgn * 0.46, 0, -0.30);
+    m.rotation.y = sgn * 0.62;
+    g.add(m);
+  }
+  const tail = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.14, 1.25), mat);
+  tail.position.set(0, 0, 0.42);
+  g.add(tail);
+  const haloMat = new THREE.MeshBasicMaterial({
+    color: '#37e0c8', transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending,
+    depthWrite: false, depthTest: false, side: THREE.DoubleSide,
+  });
+  const halo = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 3.4), haloMat);
+  halo.rotation.x = -Math.PI / 2;
+  halo.position.y = -0.1;
+  g.add(halo);
+  g.scale.setScalar(1.35);
+  g.renderOrder = 999;
+  g.userData.mat = mat;
+  g.userData.halo = haloMat;
+  return g;
+}
 
 function ringMarker(color, radius = 6) {
   const g = new THREE.Group();
@@ -84,6 +122,13 @@ export class RaceDirector {
     this.finishedPos = 0;
     this.opponentFinishCount = 0;
     this.wrongWay = 0;
+
+    // navigation arrow (created once, reused by every event)
+    if (!this.arrow) {
+      this.arrow = directionArrow();
+      this.arrow.visible = false;
+      this.game.scene.add(this.arrow);
+    }
 
     // path
     const pts = [[ev.x, ev.z], ...ev.route];
@@ -179,10 +224,12 @@ export class RaceDirector {
       const skill = clamp(0.72 + playerRep / 120 + rng.range(0, 0.12), 0.68, 1.02);
       const ai = new AIDriver(veh, pathCopy, {
         skill, laneBias: (i % 2 ? 1 : -1) * 0.1, rubberBand: 0.07,
+        closed: this.isCircuit,
         name: 'RIVAL ' + (i + 1), color: mods.paintColor,
       });
-      // start them slightly ahead on the path so they don't drive backwards to the first waypoint
-      ai.index = 0;
+      // the start line doubles as the finish line, so seed the run at the
+      // start of the route instead of guessing from the grid position
+      ai.startAtRouteStart();
       this.opponents.push({ vehicle: veh, visual, ai, finishTime: null, pos: i + 2 });
     }
   }
@@ -190,6 +237,7 @@ export class RaceDirector {
   clear() {
     this.active = false;
     this.state = 'idle';
+    if (this.arrow) this.arrow.visible = false;
     this.ev = null;
     this.clearMarkers();
     for (const o of this.opponents) {
@@ -201,6 +249,55 @@ export class RaceDirector {
   }
 
   // ---------- per-frame ----------
+  // point the navigation arrow at whatever the player has to reach next
+  updateArrow(dt, vehicle) {
+    const arrow = this.arrow;
+    if (!arrow) return;
+    const cp = this.targetPoint(vehicle);
+    if (!this.active || !cp || this.state === 'finished') {
+      arrow.visible = false;
+      return;
+    }
+    // HUD compass: bearing relative to where the car is pointing
+    const targetBearing = Math.atan2(cp.x - vehicle.x, cp.z - vehicle.z);
+    const bearing = Math.atan2(Math.sin(targetBearing - (vehicle.heading + Math.PI / 2)),
+                               Math.cos(targetBearing - (vehicle.heading + Math.PI / 2)));
+    this.game.hud.updateNav(bearing, Math.hypot(cp.x - vehicle.x, cp.z - vehicle.z));
+    const cam = this.game.camera;
+    const dx = cp.x - vehicle.x, dz = cp.z - vehicle.z;
+    const dist = Math.hypot(dx, dz);
+    // park it a few metres in front of the camera, slightly below eye level
+    const fwd = new THREE.Vector3();
+    cam.getWorldDirection(fwd);
+    fwd.y = 0;
+    if (fwd.lengthSq() < 1e-4) fwd.set(0, 0, -1);
+    fwd.normalize();
+    const right = new THREE.Vector3(-fwd.z, 0, fwd.x);
+    // the arrow drifts to the side of the screen the target is on
+    const sideDot = clamp((dx * right.x + dz * right.z) / Math.max(8, dist), -1, 1);
+    const base = cam.position.clone()
+      .add(fwd.clone().multiplyScalar(8))
+      .add(right.clone().multiplyScalar(sideDot * 2.2));
+    base.y = cam.position.y - 0.95;
+    arrow.position.lerp(base, Math.min(1, dt * 12));
+    // rotate the chevron so its nose (+Z is the tail, so -Z is forward) aims
+    // at the checkpoint in world space
+    arrow.rotation.y = Math.atan2(dx, dz) + Math.PI;
+    const pulse = 0.82 + Math.sin(performance.now() * 0.006) * 0.18;
+    arrow.userData.mat.opacity = 0.92 * pulse;
+    arrow.userData.halo.opacity = 0.16 * pulse;
+    // close to the gate: fade out so it does not cover the checkpoint
+    arrow.visible = dist > 6;
+  }
+
+  // the point the player should drive to: the active checkpoint, or the finish
+  targetPoint(vehicle) {
+    if (!this.checkpoints.length) return null;
+    const cp = this.checkpoints[this.cpIndex];
+    if (!cp) return null;
+    return { x: cp.x, z: cp.z };
+  }
+
   update(dt, vehicle, player) {
     if (!this.active) return null;
     const ev = this.ev;
@@ -346,9 +443,9 @@ export class RaceDirector {
   }
 
   _opponentCpProgress(o) {
-    // fraction of the path completed this lap
-    const prog = pathProgress(o.vehicle.x, o.vehicle.z, this.path, o.ai.index);
-    return clampi(prog, 0, 0.999);
+    // the AI tracks its own arc-length progress along the route (0..1 per lap)
+    if (o.ai && Number.isFinite(o.ai.progress)) return clampi(o.ai.progress, 0, 0.999);
+    return 0;
   }
 
   _updateOpponents(dt, playerVehicle) {

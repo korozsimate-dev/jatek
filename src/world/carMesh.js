@@ -496,7 +496,7 @@ function buildWheel(rimIdx, rimScale, tireWidth, wheelRadius, quality) {
   // rim face, slightly proud of the tyre's outer sidewall
   const face = new THREE.Mesh(new THREE.CylinderGeometry(rimR * 0.97, rimR * 0.9, 0.035, segs, 1), rimMat);
   face.rotation.x = Math.PI / 2;
-  face.position.z = tireWidth * 0.34;
+  face.position.z = tireWidth * 0.5 + 0.004;   // proud of the sidewall, not inside it
   face.userData.wheelPart = 'rim';
   grp.add(face);
 
@@ -507,12 +507,18 @@ function buildWheel(rimIdx, rimScale, tireWidth, wheelRadius, quality) {
     for (let i = 0; i < spokes; i++) {
       const m = new THREE.Mesh(geo, rimMat);
       const a = (i / spokes) * Math.PI * 2;
-      m.position.set(Math.cos(a) * spokeLen * 0.5, Math.sin(a) * spokeLen * 0.5, tireWidth * 0.36);
+      m.position.set(Math.cos(a) * spokeLen * 0.5, Math.sin(a) * spokeLen * 0.5, tireWidth * 0.5 + 0.012);
       m.rotation.z = a - Math.PI / 2;
       m.userData.wheelPart = 'rim';
       grp.add(m);
     }
   }
+
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(rimR * 0.22, rimR * 0.26, 0.03, 12), rimMat);
+  hub.rotation.x = Math.PI / 2;
+  hub.position.z = tireWidth * 0.5 + 0.02;
+  hub.userData.wheelPart = 'rim';
+  grp.add(hub);
 
   // brake disc + caliper
   const disc = new THREE.Mesh(
@@ -520,12 +526,12 @@ function buildWheel(rimIdx, rimScale, tireWidth, wheelRadius, quality) {
     new THREE.MeshStandardMaterial({ color: '#5c6167', metalness: 0.8, roughness: 0.45 })
   );
   disc.rotation.x = Math.PI / 2;
-  disc.position.z = tireWidth * 0.12;
+  disc.position.z = tireWidth * 0.18;
   disc.userData.wheelPart = 'rim';
   grp.add(disc);
   const cal = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.13, 0.05),
     new THREE.MeshStandardMaterial({ color: '#c8322a', metalness: 0.5, roughness: 0.5 }));
-  cal.position.set(-rimR * 0.55, rimR * 0.25, tireWidth * 0.18);
+  cal.position.set(-rimR * 0.55, rimR * 0.25, tireWidth * 0.30);
   cal.userData.wheelPart = 'rim';
   grp.add(cal);
 
@@ -534,6 +540,7 @@ function buildWheel(rimIdx, rimScale, tireWidth, wheelRadius, quality) {
     barrel.geometry.dispose(); face.geometry.dispose();
     if (spokes > 0) geo.dispose();
     disc.geometry.dispose(); disc.material.dispose();
+    hub.geometry.dispose();
     cal.geometry.dispose(); cal.material.dispose();
   };
   return grp;
@@ -935,6 +942,110 @@ export class CarVisual {
           }
         }
       }
+    }
+
+    // ---- panel gaps, chrome, handles, plates: the details that make a lo-fi
+    // loft read as a real car instead of a solid lump of paint ----
+    const gapMat = new THREE.MeshStandardMaterial({
+      color: '#0a0b0d', roughness: 0.95, metalness: 0.0,
+    });
+    const chromeMat = new THREE.MeshStandardMaterial({
+      color: '#cfd6dc', roughness: 0.22, metalness: 1.0,
+    });
+    const rubberMat = new THREE.MeshStandardMaterial({
+      color: '#101214', roughness: 0.9, metalness: 0.05,
+    });
+    const boxyBody = B.style === 'van' || B.style === 'truck';
+    const BODY = { gapMat, chromeMat, rubberMat };
+    this.trimMats = BODY;
+    // thin dark sliver laid onto the surface: reads as a shut line
+    const shutLine = (x, width, sideSign) => {
+      const surf = surfaceAt(x);
+      const g = new THREE.Mesh(new THREE.BoxGeometry(width, 0.012, 0.022), gapMat);
+      g.position.set(x, surf.yTop - 0.055, sideSign * (surf.hw - 0.004));
+      g.rotation.x = 0.06;
+      this.bodyGroup.add(g); this.parts.push(g);
+      return g;
+    };
+    // vertical shut line on the flank (between a door and its neighbour)
+    const doorCut = (x, sideSign, y0 = 0.42, y1 = null) => {
+      const surf = surfaceAt(x);
+      const top = y1 ?? (surf.yTop - 0.05);
+      const h = Math.max(0.1, top - y0);
+      const g = new THREE.Mesh(new THREE.BoxGeometry(0.016, h, 0.02), gapMat);
+      g.position.set(x, y0 + h / 2, sideSign * (surf.hw - 0.003));
+      this.bodyGroup.add(g); this.parts.push(g);
+    };
+    if (!boxyBody) {
+      const doorFront = cabin.aX - 0.30;      // behind the front arch
+      const doorRear = cabin.cX + 0.22;
+      const doorSplit = clamp(cabin.bX - 0.02, cabin.cX + 0.3, cabin.aX - 0.4);
+      for (const sgn of [1, -1]) {
+        doorCut(doorFront, sgn);
+        doorCut(doorRear, sgn);
+        doorCut(doorSplit, sgn);
+        // horizontal shut line under the belt, along the doors
+        shutLine(0, 0.016, sgn);
+        // flush door handles: a small dark recess with a chrome blade
+        for (const hx of [doorFront - 0.45, doorSplit - 0.42]) {
+          const surf = surfaceAt(hx);
+          const handle = new THREE.Mesh(new THREE.BoxGeometry(0.20, 0.035, 0.03), chromeMat);
+          handle.position.set(hx, surf.yTop - 0.115, sgn * (surf.hw - 0.008));
+          this.bodyGroup.add(handle); this.parts.push(handle);
+          const recess = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.055, 0.012), gapMat);
+          recess.position.set(hx, surf.yTop - 0.115, sgn * (surf.hw - 0.016));
+          this.bodyGroup.add(recess); this.parts.push(recess);
+        }
+      }
+      // chrome belt-line strip running the length of the greenhouse
+      for (const sgn of [1, -1]) {
+        const beltLen = Math.abs(cabin.aX - cabin.cX) + 0.2;
+        const strip = new THREE.Mesh(new THREE.BoxGeometry(beltLen, 0.022, 0.014), chromeMat);
+        strip.position.set((cabin.aX + cabin.cX) / 2, beltY + 0.008, sgn * (surfaceAt((cabin.aX + cabin.cX) / 2).hw - 0.012));
+        this.bodyGroup.add(strip); this.parts.push(strip);
+      }
+      // shut lines across the hood and the boot lid
+      // fore-aft shut lines down the edges of the hood and the boot lid
+      for (const sgn of [1, -1]) {
+        const hoodLen = Math.max(0.2, cabin.aX - (noseX - B.hoodLen * 0.10));
+        const hoodCut = new THREE.Mesh(new THREE.BoxGeometry(hoodLen, 0.016, 0.014), gapMat);
+        hoodCut.position.set((cabin.aX + noseX - B.hoodLen * 0.10) / 2,
+          hoodYAt((cabin.aX + noseX) / 2) - 0.004, sgn * hw * 0.66);
+        this.bodyGroup.add(hoodCut); this.parts.push(hoodCut);
+        const trunkLen = Math.max(0.2, (cabin.cX - (-noseX)) * 0.72);
+        const trunkCut = new THREE.Mesh(new THREE.BoxGeometry(trunkLen, 0.016, 0.014), gapMat);
+        trunkCut.position.set((cabin.cX - noseX) / 2, deckTop + 0.002, sgn * hw * 0.64);
+        this.bodyGroup.add(trunkCut); this.parts.push(trunkCut);
+      }
+    }
+    // wipers parked at the base of the windscreen
+    {
+      const wiperMat = new THREE.MeshStandardMaterial({ color: '#15181b', roughness: 0.7, metalness: 0.2 });
+      for (const sgn of [1, -1]) {
+        const blade = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.012, 0.018), wiperMat);
+        blade.position.set(cabin.aX - 0.07, beltY + 0.035, sgn * hullHalf * 0.38);
+        blade.rotation.y = sgn * 0.30;
+        blade.rotation.z = -0.14;
+        this.bodyGroup.add(blade); this.parts.push(blade);
+      }
+    }
+    // number plates, front and rear
+    {
+      const plateMat = new THREE.MeshStandardMaterial({ color: '#dfe4e8', roughness: 0.6, metalness: 0.1 });
+      const fp = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.11, 0.34), plateMat);
+      fp.position.set(noseX - 0.045, Math.max(0.30, beltY * 0.42), 0);
+      this.bodyGroup.add(fp); this.parts.push(fp);
+      const rp = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.11, 0.34), plateMat);
+      rp.position.set(-noseX + 0.045, Math.max(0.32, beltY * 0.44), 0);
+      this.bodyGroup.add(rp); this.parts.push(rp);
+    }
+    // exhaust note hardware on the stock bumper: a single dark tip even at level 0
+    if ((PARTS.exhaustTip[mods.exhaustTip]?.vis?.exhaustTip ?? 0) === 0) {
+      const tipMat = new THREE.MeshStandardMaterial({ color: '#5e646a', metalness: 0.9, roughness: 0.4 });
+      const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.042, 0.14, 10), tipMat);
+      tip.rotation.z = Math.PI / 2;
+      tip.position.set(-noseX + 0.05, Math.max(0.20, tailSurf.yBot + 0.05), -hw * 0.55);
+      this.bodyGroup.add(tip); this.parts.push(tip);
     }
 
     // ---- mirrors: mounted on the belt line just behind the A pillar ----

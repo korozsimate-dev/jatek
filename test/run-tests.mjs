@@ -334,22 +334,84 @@ ok(canyonRoad().length > 8, 'canyon road defined');
 // ------------------------------------------------------------
 section('AI drivers');
 for (const ev of EVENTS.filter((e) => e.opponents > 0)) {
+  const closed = ev.type === 'circuit' || ev.type === 'highway';
   const pts = [[ev.x, ev.z], ...ev.route];
-  const path = densifyPath(pts, 9, true);
+  const path = densifyPath(pts, 9, closed);
   const def = CAR_BY_ID['coupe_zen'];
   const veh = new Vehicle(def, defaultMods(def), { transmission: 'auto' });
   veh.reset(ev.x, ev.z, ev.heading || 0);
-  const ai = new AIDriver(veh, path, { skill: 0.85 });
-  let maxSpeed = 0, nan = false;
-  for (let i = 0; i < 60 * 25; i++) {
+  const ai = new AIDriver(veh, path, { skill: 0.85, closed });
+  ai.startAtRouteStart();
+  let maxSpeed = 0, nan = false, offMax = 0, offSum = 0;
+  for (let i = 0; i < 60 * 40; i++) {
     ai.update(1 / 60, { world: null });
     if (!isFinite(veh.x) || !isFinite(veh.z)) { nan = true; break; }
     maxSpeed = Math.max(maxSpeed, veh.speedKmh);
+    // how far the rival is from the racing line
+    let best = Infinity;
+    for (const p of ai.line) {
+      const d = Math.hypot(p.x - veh.x, p.z - veh.z);
+      if (d < best) best = d;
+    }
+    offSum += best;
+    offMax = Math.max(offMax, best);
   }
   ok(!nan, `AI drives ${ev.id} without NaN`);
   ok(maxSpeed > 25, `AI reaches a sensible speed on ${ev.id} (${maxSpeed.toFixed(0)} km/h)`);
-  ok(ai.index > 0 || veh.speedKmh > 10, `AI advances along ${ev.id}`);
-  ok(pathProgress(veh.x, veh.z, path, ai.index) >= 0, 'progress function returns a number');
+  ok(ai.lap > 0 || ai.progress > 0.2, `AI advances along ${ev.id} (lap ${ai.lap}, ${(ai.progress * 100).toFixed(0)}%)`);
+  // the whole point of the rewrite: rivals stay on the racing line instead of
+  // wandering off and circling their own waypoint
+  ok(offSum / (60 * 40) < 8, `AI stays on the racing line on ${ev.id} (avg ${(offSum / (60 * 40)).toFixed(1)} m)`);
+  ok(offMax < 32, `AI never wanders far off the road on ${ev.id} (max ${offMax.toFixed(1)} m)`);
+}
+
+// ------------------------------------------------------------
+section('AI route handling');
+{
+  // an open route must not wrap back to the start: rivals that finish a
+  // sprint used to drive back down the road to the first waypoint
+  const ev = EVENTS.find((e) => e.type === 'sprint');
+  const path = densifyPath([[ev.x, ev.z], ...ev.route], 9, false);
+  const def = CAR_BY_ID['coupe_zen'];
+  const veh = new Vehicle(def, defaultMods(def), { transmission: 'auto' });
+  veh.reset(ev.x, ev.z, ev.heading || 0);
+  const ai = new AIDriver(veh, path, { skill: 0.9, closed: false });
+  ai.startAtRouteStart();
+  let reachedEnd = false;
+  for (let i = 0; i < 60 * 120; i++) {
+    ai.update(1 / 60, { world: null });
+    if (ai.atEnd) { reachedEnd = true; break; }
+  }
+  ok(reachedEnd, `AI finishes the open sprint ${ev.id}`);
+  ok(ai.lap === 1, `finishing an open route counts exactly one lap (${ai.lap})`);
+  const endX = veh.x, endZ = veh.z;
+  for (let i = 0; i < 60 * 6; i++) ai.update(1 / 60, { world: null });
+  ok(Math.hypot(veh.x - endX, veh.z - endZ) < 25, 'finished rival stops at the line instead of driving back');
+  ok(Math.abs(veh.speedKmh) < 3, `finished rival comes to rest (${veh.speedKmh.toFixed(1)} km/h)`);
+}
+
+// ------------------------------------------------------------
+section('AI cornering');
+{
+  // the rivals used to arrive at a corner 40 km/h too fast and spin; they must
+  // now slow down BEFORE the bend
+  const ev = EVENTS.find((e) => e.id === 'circuit_downtown');
+  const path = densifyPath([[ev.x, ev.z], ...ev.route], 9, true);
+  const def = CAR_BY_ID['coupe_zen'];
+  const veh = new Vehicle(def, defaultMods(def), { transmission: 'auto' });
+  veh.reset(ev.x, ev.z, ev.heading || 0);
+  const ai = new AIDriver(veh, path, { skill: 0.85, closed: true });
+  ai.startAtRouteStart();
+  let maxSlip = 0, maxYaw = 0, minSpeed = Infinity;
+  for (let i = 0; i < 60 * 60; i++) {
+    ai.update(1 / 60, { world: null });
+    maxSlip = Math.max(maxSlip, Math.abs(veh.slipAngle));
+    maxYaw = Math.max(maxYaw, Math.abs(veh.yawRate));
+    if (i > 180) minSpeed = Math.min(minSpeed, veh.speedKmh);
+  }
+  ok(maxSlip < 0.45, `AI does not spin out (max slip ${maxSlip.toFixed(2)} rad)`);
+  ok(maxYaw < 2.2, `AI does not fishtail (max yaw rate ${maxYaw.toFixed(2)} rad/s)`);
+  ok(minSpeed > 15, `AI keeps rolling through the lap (min ${minSpeed.toFixed(0)} km/h)`);
 }
 
 // ------------------------------------------------------------

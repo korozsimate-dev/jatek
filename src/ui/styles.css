@@ -184,6 +184,13 @@ input[type=checkbox]:checked:after{transform:translateX(17px);background:var(--t
 .race-name{font-size:12px;letter-spacing:.3em;color:var(--teal)}
 .race-meta{font-family:var(--font-num);font-size:15px;letter-spacing:.06em;margin-top:2px}
 .race-meta .sep{color:var(--txt-faint);margin:0 7px}
+/* next-checkpoint compass: the arrow turns towards the gate */
+.race-nav{margin-top:8px;display:inline-flex;align-items:center;gap:9px;padding:4px 12px 4px 8px;
+  border-radius:4px;background:rgba(10,13,17,.8);border:1px solid rgba(37,224,208,.35)}
+#race-nav-arrow{font-size:15px;line-height:1;color:var(--cyan);display:inline-block;
+  transition:transform .12s linear;text-shadow:0 0 10px rgba(37,224,208,.7)}
+#race-nav-arrow.behind{color:var(--amber);text-shadow:0 0 10px rgba(255,194,71,.7)}
+#race-nav-dist{font-family:var(--font-num);font-size:13px;letter-spacing:.08em;color:#cfe9e6}
 .objective{margin-top:10px;display:inline-block;padding:6px 16px;border-radius:4px;
   background:rgba(10,13,17,.82);border-left:2px solid var(--amber);font-size:11px;letter-spacing:.14em;color:#e6d8b5}
 .drift-meter{margin-top:12px;display:inline-flex;align-items:baseline;gap:10px;

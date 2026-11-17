@@ -153,17 +153,18 @@ section('player rig');
   const player = new Player(scene);
   player.place(0, 0, 0);
   // the rig must face +X at heading 0 (that is how it walks)
-  const forward = new THREE.Vector3(Math.cos(player.heading), 0, -Math.sin(player.heading));
+  const forward = new THREE.Vector3(Math.sin(player.heading), 0, Math.cos(player.heading));
   let noseMesh = null;
   player.group.updateMatrixWorld(true);
   // sunglasses / toes are on the +X face of the model
   player.group.traverse((o) => {
-    if (o.isMesh && o.geometry.parameters && o.geometry.parameters.depth === 0.25 && o.geometry.parameters.height === 0.05) noseMesh = o;
+    const gp = (o.geometry && o.geometry.parameters) || {};
+    if (o.isMesh && gp.height === 0.05 && gp.depth === 0.03 && gp.width === 0.25) noseMesh = o;
   });
   check(!!noseMesh, 'sunglasses exist on the model');
   if (noseMesh) {
     const wp = noseMesh.getWorldPosition(new THREE.Vector3());
-    check(wp.x > 0.05, `the face points along the walking direction (x=${wp.x.toFixed(2)})`);
+    check(wp.z > 0.05, `the face points along the walking direction (z=${wp.z.toFixed(2)})`);
   }
   // walking forward must move the body in the direction it faces
   const input = {
@@ -174,11 +175,42 @@ section('player rig');
   for (let i = 0; i < 30; i++) player.update(1 / 60, input, null, 0);
   const moved = new THREE.Vector3(player.x, 0, player.z);
   check(moved.length() > 0.2, `W moves the character (${moved.length().toFixed(2)} m)`);
-  const facing = new THREE.Vector3(Math.cos(player.heading), 0, -Math.sin(player.heading));
+  const facing = new THREE.Vector3(Math.sin(player.heading), 0, Math.cos(player.heading));
   check(moved.clone().normalize().dot(facing) > 0.9, 'the character moves forward, not backwards');
   // limb swing must happen around Z (the direction of travel plane)
   player.update(1 / 60, input, null, 0);
-  check(Math.abs(player.legL.pivot.rotation.z) > 0 || Math.abs(player.legR.pivot.rotation.z) > 0, 'legs stride');
+  check(Math.abs(player.legL.pivot.rotation.x) > 0 || Math.abs(player.legR.pivot.rotation.x) > 0, 'legs stride');
+}
+
+
+section('walking: the body faces the movement direction from any camera angle');
+{
+  const scene = new THREE.Scene();
+  const walker = new Player(scene);
+  for (const camYaw of [0, Math.PI / 2, Math.PI, -Math.PI / 2, 0.9, -2.4]) {
+    for (const key of ['KeyW', 'KeyD', 'KeyS', 'KeyA']) {
+      walker.place(0, 0, 0);
+      walker.speed = 0;
+      const neg = { KeyW: 'KeyS', KeyD: 'KeyA', KeyS: 'KeyW', KeyA: 'KeyD' }[key];
+      const input = { down: (k) => k === key, axis: (n, pos) => (pos === key ? 1 : n === key ? -1 : 0) };
+      for (let i = 0; i < 120; i++) walker.update(1 / 60, input, null, camYaw);
+      const cf = { x: -Math.sin(camYaw), z: -Math.cos(camYaw) };
+      const cr = { x: Math.cos(camYaw), z: -Math.sin(camYaw) };
+      const want = key === 'KeyW' ? cf : key === 'KeyS' ? { x: -cf.x, z: -cf.z } : key === 'KeyD' ? cr : { x: -cr.x, z: -cr.z };
+      const len = Math.hypot(walker.x, walker.z);
+      if (len < 0.15) { check(false, `moved nowhere for ${key} at cam ${camYaw.toFixed(2)}`); continue; }
+      const moved = { x: walker.x / len, z: walker.z / len };
+      const face = { x: Math.sin(walker.heading), z: Math.cos(walker.heading) };
+      const moveDot = moved.x * want.x + moved.z * want.z;
+      const faceDot = face.x * moved.x + face.z * moved.z;
+      check(moveDot > 0.98 && faceDot > 0.98,
+        `cam ${camYaw.toFixed(2)} + ${key}: walks where asked and faces forward`,
+        `move ${moveDot.toFixed(2)} face ${faceDot.toFixed(2)}`);
+    }
+  }
+  // a car heading must be converted, or the player spawns sideways
+  check(Math.abs(Player.fromVehicleHeading(0) - Math.PI / 2) < 1e-9,
+    'vehicle heading 0 maps to rig heading +90 deg (model faces +Z)');
 }
 
 section('night visibility');

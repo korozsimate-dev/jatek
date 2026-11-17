@@ -111,7 +111,7 @@ export class Game {
     }
     await step(58, 'POLISHING CHROME...');
     this.player = new Player(this.scene);
-    this.player.place(-300, 190, Math.PI);
+    this.player.place(-300, 190, Player.fromVehicleHeading(Math.PI));
     this.cameraRig = new CameraRig(this.camera, this.input, this.settings);
     this.cameraRig.colliderQuery = (x, z, r) => {
       const near = this.city.colliders.query(x, z, r);
@@ -374,7 +374,8 @@ export class Game {
       sp = { x: savedPos.x, z: savedPos.z, heading: savedPos.h ?? 0 };
     }
     // stand beside the driver's door, facing the same way as the car
-    this.player.place(sp.x + Math.sin(sp.heading) * 2.3, sp.z + Math.cos(sp.heading) * 2.3, sp.heading);
+    this.player.place(sp.x + Math.sin(sp.heading) * 2.3, sp.z + Math.cos(sp.heading) * 2.3,
+      Player.fromVehicleHeading(sp.heading));
     this.setupPlayerVehicle(def, car.mods, car.uid, sp.x, sp.z, sp.heading);
     const startInCar = !!(savedPos && savedPos.inCar);
     this.playerInCar = false;
@@ -396,7 +397,7 @@ export class Game {
     if (this.playerVehicle) this.playerVehicle.transmission = this.settings.get('transmission') || 'auto';
     this.lastDistrict = '';
     if (startInCar) {
-      this.player.place(sp.x, sp.z, sp.heading);
+      this.player.place(sp.x, sp.z, Player.fromVehicleHeading(sp.heading));
       this.putPlayerInCar();
     }
   }
@@ -610,9 +611,9 @@ export class Game {
     this.player.place(
       v.x + Math.sin(v.heading) * side,
       v.z + Math.cos(v.heading) * side,
-      v.heading
+      Player.fromVehicleHeading(v.heading)
     );
-    this.cameraRig.yaw = CameraRig.chaseYaw(v.heading);
+    this.cameraRig.yaw = Player.fromVehicleHeading(v.heading);
     this.player.setVisible(true);
     this.audio.stopEngine();
     this.audio.updateSkid(0, 0);
@@ -777,6 +778,7 @@ export class Game {
       // race
       if (this.race.active) {
         this.race.update(dt, v, this.player);
+        this.race.updateArrow(dt, v);
         if (this.race.state === 'finished' && this.race.result && this.state === 'race') {
           this.finishRace(this.race.result);
         }
@@ -799,7 +801,10 @@ export class Game {
       }
       this.effects.updateVehicle(dt, null, null);
       this.checkWorldInteractionsFoot();
-      if (this.race.active && this.playerVehicle) this.race.update(dt, this.playerVehicle, this.player);
+      if (this.race.active && this.playerVehicle) {
+        this.race.update(dt, this.playerVehicle, this.player);
+        this.race.updateArrow(dt, this.playerVehicle);
+      }
       if (this.race.active && this.race.state === 'finished' && this.race.result && this.state === 'race') {
         this.finishRace(this.race.result);
       }
