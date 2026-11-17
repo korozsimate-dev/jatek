@@ -58,6 +58,11 @@ export function initMaterials() {
     red: new THREE.MeshBasicMaterial({ color: '#ff3b30', toneMapped: false }),
     white: new THREE.MeshBasicMaterial({ color: '#e8f4ff', toneMapped: false }),
   };
+  // additive halo used for lamp heads and neon spill
+  MATS.lampGlow = new THREE.MeshBasicMaterial({
+    color: '#ffd9a0', transparent: true, opacity: 0.34,
+    blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+  });
   MATS.lampHead = new THREE.MeshStandardMaterial({
     color: '#ffe2a8', emissive: new THREE.Color('#ffcf80'), emissiveIntensity: 1.4, roughness: 0.4,
   });

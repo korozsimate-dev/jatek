@@ -10,6 +10,7 @@ import { CONFIG, QUALITY } from '../config.js';
 import { clamp, damp, formatMoney, formatTime, lerp, ordinal, RNG } from '../core/util.js';
 import { CAR_BY_ID, computeStats, defaultMods, rankFor } from '../data/cars.js';
 import { City } from '../world/city.js';
+import { MATS } from '../world/buildings.js';
 import { Environment } from '../world/environment.js';
 import { makeEnv, CarVisual } from '../world/carMesh.js';
 import { Vehicle } from '../physics/vehicle.js';
@@ -507,7 +508,7 @@ export class Game {
     this.playerVehicle.reset(ev.x, ev.z, ev.heading || 0);
     this.playerVehicle.visual.group.position.set(ev.x, 0.16, ev.z);
     this.playerVehicle.visual.group.rotation.y = ev.heading || 0;
-    this.cameraRig.yaw = ev.heading || 0;
+    this.cameraRig.yaw = CameraRig.chaseYaw(ev.heading || 0);
     this.cameraRig.smoothPos.set(ev.x + Math.sin(this.cameraRig.yaw) * 8, 3.4, ev.z + Math.cos(this.cameraRig.yaw) * 8);
     this.currentEvent = null;
     this.input.requestLock();
@@ -586,11 +587,11 @@ export class Game {
     this.playerInCar = true;
     this.player.setVisible(false);
     this.cameraRig.modeIndex = 0;
-    this.cameraRig.yaw = this.playerVehicle.heading;
+    this.cameraRig.yaw = CameraRig.chaseYaw(this.playerVehicle.heading);
     this.cameraRig.smoothPos.set(
-      this.playerVehicle.x + Math.sin(this.cameraRig.yaw) * 7,
+      this.playerVehicle.x - Math.cos(this.cameraRig.yaw) * 7,
       3.4,
-      this.playerVehicle.z + Math.cos(this.cameraRig.yaw) * 7
+      this.playerVehicle.z + Math.sin(this.cameraRig.yaw) * 7
     );
     this.audio.startEngine();
     this.audio.setEngine(this.playerVehicle.def.sound);
@@ -611,7 +612,7 @@ export class Game {
       v.z + Math.cos(v.heading) * side,
       v.heading
     );
-    this.cameraRig.yaw = v.heading + Math.PI;   // camera stays behind the player
+    this.cameraRig.yaw = CameraRig.chaseYaw(v.heading);
     this.player.setVisible(true);
     this.audio.stopEngine();
     this.audio.updateSkid(0, 0);
@@ -685,6 +686,8 @@ export class Game {
     this.env.update(dt, this.camera);
     this.city.update(dt, this.camera);
     this.city.updateLights(this.env.nightAmount, this.camera, QUALITY[this.qualityName].lampLights);
+    // wet tarmac follows the weather without rebuilding any material
+    this.env.applyWetness(MATS.asphalt);
     this.audio.updateAmbience(this.env.nightAmount);
     if (this.previewCar) {
       this.previewCar.update(dt, { steer: 0, wheelDelta: 0, suspension: [0, 0, 0, 0] });
@@ -713,6 +716,8 @@ export class Game {
     this.env.update(dt, this.camera);
     this.city.update(dt, this.camera);
     this.city.updateLights(this.env.nightAmount, this.camera, QUALITY[this.qualityName].lampLights);
+    // wet tarmac follows the weather without rebuilding any material
+    this.env.applyWetness(MATS.asphalt);
     // animate the car
     if (this.previewCar) {
       this.previewCar.wheels.forEach((w) => { w.spin.rotation.z = 0; });
@@ -735,6 +740,8 @@ export class Game {
     const envState = this.env.update(dt, this.camera);
     this.city.update(dt, this.camera);
     this.city.updateLights(this.env.nightAmount, this.camera, QUALITY[this.qualityName].lampLights);
+    // wet tarmac follows the weather without rebuilding any material
+    this.env.applyWetness(MATS.asphalt);
     this.traffic.update(dt, this.playerInCar ? this.playerVehicle : this.player, this.getFocusPos());
     this.peds.update(dt, this.playerInCar ? this.playerVehicle : this.player, this.getFocusPos());
     this.audio.updateAmbience(this.env.nightAmount);

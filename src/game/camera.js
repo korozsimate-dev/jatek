@@ -78,11 +78,15 @@ export class CameraRig {
     return { yaw: this.yaw };
   }
 
+  // Convention: `yaw` is the direction the car FACES. The chase camera is
+  // placed at -forward, so "yaw == heading" is what keeps it behind the car.
+  static chaseYaw(heading) { return heading; }
+
   updateDrive(dt, vehicle) {
     this.updateMouse();
     // auto-recentre behind the car after a moment of no mouse input
     if (Math.abs(this.input.mouse.dx) < 0.5) {
-      const wanted = vehicle.heading;
+      const wanted = CameraRig.chaseYaw(vehicle.heading);
       let d = wrapAngle(wanted - this.yaw);
       // only auto re-centre when the car is moving forward
       if (vehicle.longSpeed > 3) {
@@ -108,7 +112,8 @@ export class CameraRig {
     const carPos = this._tmp.set(vehicle.x, 0, vehicle.z);
     const fwdX = Math.cos(vehicle.heading), fwdZ = -Math.sin(vehicle.heading);
 
-    if (mode >= 2) {
+    // 2 = HOOD, 3 = FIRST PERSON. Cinematic (4) is a chase camera.
+    if (mode === 2 || mode === 3) {
       // hood / first person: rigidly attached, small lag
       const eyeY = mode === 3 ? CONFIG.player.eyeHeight - 0.28 : 1.32;
       const px = carPos.x + fwdX * (mode === 3 ? 0.1 : 1.35);
@@ -124,10 +129,11 @@ export class CameraRig {
       this.camera.lookAt(this.smoothLook);
       this.camera.up.set(0, 1, 0);
     } else {
+      // sit behind the car: -forward, where forward = (cos yaw, -sin yaw)
       const back = new THREE.Vector3(
-        Math.sin(this.yaw) * Math.cos(this.pitch),
+        -Math.cos(this.yaw) * Math.cos(this.pitch),
         Math.sin(Math.max(this.pitch, 0.06)) + 0.30,
-        Math.cos(this.yaw) * Math.cos(this.pitch)
+        Math.sin(this.yaw) * Math.cos(this.pitch)
       ).normalize().multiplyScalar(this.currentDistance);
       const want = new THREE.Vector3(
         carPos.x + back.x,

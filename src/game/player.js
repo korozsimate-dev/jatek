@@ -140,7 +140,13 @@ export class Player {
       let d = targetHeading - this.heading;
       while (d > Math.PI) d -= Math.PI * 2;
       while (d < -Math.PI) d += Math.PI * 2;
-      this.heading += d * Math.min(1, dt * 12);
+      // Snap the facing to the movement direction: a slow turn makes the body
+      // slide sideways (and read as "walking backwards") for half a second.
+      this.heading += d * Math.min(1, dt * 20);
+      // remember the turn rate so the torso can lean into it
+      this.anim.turn = clamp(d * 2.2, -1, 1);
+    } else {
+      this.anim.turn *= 0.85;
     }
     const step = this.speed * dt;
     this.x += Math.cos(this.heading) * step;
@@ -173,6 +179,9 @@ export class Player {
     this.armL.rotation.z = -s2 * 0.60 * amp;
     this.armR.rotation.z = -s * 0.60 * amp;
     this.torso.rotation.z = -s * 0.06 * amp;
+    // bank into turns so direction changes read clearly
+    this.torso.rotation.x = (this.anim.turn || 0) * 0.20 * amp;
+    this.hips.rotation.x = (this.anim.turn || 0) * 0.10 * amp;
     this.hips.position.y = 0.92 + Math.abs(Math.sin(this.anim.phase * 2)) * 0.035 * amp;
     // idle breathing
     if (amp < 0.1) {

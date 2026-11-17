@@ -412,3 +412,14 @@ input[type=checkbox]:checked:after{transform:translateX(17px);background:var(--t
 .color-picker-row .sw{width:22px;height:22px;border-radius:3px;border:1px solid rgba(255,255,255,.28);
   cursor:pointer;transition:transform .12s}
 .color-picker-row .sw:hover{transform:scale(1.16)}
+
+/* gear shift flash + redline feedback on the speedo */
+@keyframes gearFlash {
+  0% { transform: scale(1.35); color: #fff6d0; text-shadow: 0 0 18px rgba(255, 220, 120, 0.95); }
+  100% { transform: scale(1); color: inherit; text-shadow: none; }
+}
+#gear-val.gear-flash { animation: gearFlash 260ms ease-out; }
+#speedo.redline .gauge-arc-glow { filter: drop-shadow(0 0 6px rgba(255, 70, 60, 0.85)); }
+#speedo.redline .speedo-digital #speed-val { color: #ff6a5a; }
+
+

@@ -119,8 +119,8 @@ export class Effects {
     this.scene = scene;
     this.quality = quality;
     const mul = quality === 'low' ? 0.35 : quality === 'medium' ? 0.7 : 1;
-    this.smoke = new ParticlePool(scene, Math.round(340 * mul), {
-      color: '#c8c8c8', gravity: 0.8, drag: 1.1, grow: 2.2, renderOrder: 4,
+    this.smoke = new ParticlePool(scene, Math.round(520 * mul), {
+      color: '#d2d2d2', gravity: 0.55, drag: 0.95, grow: 2.8, renderOrder: 4,
     });
     this.sparks = new ParticlePool(scene, Math.round(160 * mul), {
       color: '#ffce6a', additive: true, gravity: -9, drag: 0.6, grow: -0.6,
@@ -148,11 +148,11 @@ export class Effects {
     const speed = Math.abs(vehicle.longSpeed);
     const slip = Math.abs(vehicle.slipAngle);
     const spin = vehicle.wheelspinAmount || 0;
-    const smokeAmt = Math.max(0, (slip - 0.10) * 2.2) + spin * 0.75 + (vehicle.braking > 0.5 && speed > 14 ? 0.3 : 0);
+    const smokeAmt = Math.max(0, (slip - 0.08) * 2.8) + spin * 0.85 + (vehicle.braking > 0.5 && speed > 14 ? 0.35 : 0);
     const wheelR = vehicle.def.body.wheelR;
 
     if (smokeAmt > 0.06 && speed > 3) {
-      this._acc += dt * 90 * Math.min(1.6, smokeAmt);
+      this._acc += dt * 120 * Math.min(1.8, smokeAmt);
       const rear = visual.wheels.filter((w) => !w.isFront);
       while (this._acc > 1) {
         this._acc -= 1;

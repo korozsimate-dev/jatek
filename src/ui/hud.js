@@ -88,7 +88,16 @@ export class Hud {
         this.lastSpeed = kmh;
       }
       const gear = vehicle.longSpeed < -0.4 ? 'R' : vehicle.shiftTimer > 0 ? '·' : String(vehicle.gear);
-      if (gear !== this.lastGear) { this.el.gear.textContent = gear; this.lastGear = gear; }
+      if (gear !== this.lastGear) {
+        this.el.gear.textContent = gear;
+        // flash the gear box on every shift so the box feels mechanical
+        if (this.lastGear !== undefined && /^[0-9R]$/.test(gear)) {
+          this.el.gear.classList.remove('gear-flash');
+          void this.el.gear.offsetWidth;      // restart the CSS animation
+          this.el.gear.classList.add('gear-flash');
+        }
+        this.lastGear = gear;
+      }
       if (this.el.carName.textContent !== vehicle.def.name) {
         this.el.carName.textContent = vehicle.def.name;
         this.el.carHp.textContent = vehicle.stats.hp + ' HP';
@@ -97,8 +106,13 @@ export class Hud {
       const rpmN = clamp(vehicle.rpm / 8000, 0, 1);
       const sweep = rpmN * 270;
       const arc = describeArc(100, 100, 78, 135, 135 + sweep);
-      this.el.rpmArc.setAttribute('d', arc);
-      this.el.rpmGlow.setAttribute('d', arc);
+      // smooth the needle instead of snapping between frames
+      this._rpmSmooth = this._rpmSmooth === undefined ? rpmN : this._rpmSmooth + (rpmN - this._rpmSmooth) * 0.35;
+      const smoothed = describeArc(100, 100, 78, 135, 135 + this._rpmSmooth * 270);
+      this.el.rpmArc.setAttribute('d', smoothed);
+      this.el.rpmGlow.setAttribute('d', smoothed);
+      // over-rev warning glow
+      this.el.speedo.classList.toggle('redline', rpmN > 0.88);
       this.el.nitro.classList.toggle('hidden', !(vehicle.stats.hp >= 0 && vehicle.mods && (vehicle.mods.turbo > 0 || vehicle.def.body.style === 'super')));
       this.el.nitroFill.style.width = (vehicle.nitro * 100).toFixed(0) + '%';
     } else {

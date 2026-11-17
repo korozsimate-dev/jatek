@@ -212,5 +212,62 @@ section('night visibility');
   check(car.beamLights.every((l) => l.intensity > 0), 'lights survive a rebuild (no flicker when tuning)');
 }
 
+
+section('body faces outward (otherwise FrontSide culls the whole car)');
+for (const def of CAR_DEFS) {
+  const car = new CarVisual(def, defaultMods(def), { quality: 'medium' });
+  const g = car.bodyMesh.geometry;
+  const pos = g.attributes.position, idx = g.index;
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  const n = new THREE.Vector3(), ctr = new THREE.Vector3(), t = new THREE.Vector3();
+  let inward = 0, total = 0;
+  for (let i = 0; i < idx.count; i += 3) {
+    a.fromBufferAttribute(pos, idx.getX(i));
+    b.fromBufferAttribute(pos, idx.getX(i + 1));
+    c.fromBufferAttribute(pos, idx.getX(i + 2));
+    n.subVectors(b, a).cross(t.subVectors(c, a)).normalize();
+    ctr.copy(a).add(b).add(c).multiplyScalar(1 / 3);
+    // reference points away from the body centre line
+    const ref = t.set(ctr.x * 0.2, ctr.y - def.body.height * 0.45, ctr.z).normalize();
+    total++;
+    if (n.dot(ref) <= 0) inward++;
+  }
+  check(inward === 0, `${def.id} all ${total} body triangles face outward`, `${inward} inward`);
+  check(car.bodyMesh.material.side === THREE.FrontSide, `${def.id} paint uses FrontSide (proves winding matters)`);
+}
+
+section('chase camera sits behind the car');
+{
+  const { CameraRig } = await import('../src/game/camera.js');
+  const cam = new THREE.PerspectiveCamera(70, 16 / 9, 0.25, 1500);
+  const rig = new CameraRig(cam, { mouse: { dx: 0, dy: 0 } }, { get: (k) => (k === 'fov' ? 70 : k === 'camDist' ? 6.6 : 0) });
+  for (const heading of [0, Math.PI / 2, Math.PI, -Math.PI / 2, 0.7, -2.1]) {
+    for (const mode of [0, 1, 4]) {           // chase, close chase, cinematic
+      const v = { x: 0, z: 0, heading, longSpeed: 30, pitch: 0, roll: 0 };
+      rig.modeIndex = mode;
+      rig.yaw = CameraRig.chaseYaw(heading);
+      rig.smoothPos.set(0, 3, 0); rig.smoothLook.set(0, 1, 0);
+      for (let i = 0; i < 240; i++) rig.updateDrive(1 / 60, v);
+      const fwd = new THREE.Vector3(Math.cos(heading), 0, -Math.sin(heading));
+      const toCam = new THREE.Vector3(cam.position.x, 0, cam.position.z).normalize();
+      const dir = new THREE.Vector3(); cam.getWorldDirection(dir);
+      check(toCam.dot(fwd) < -0.85 && dir.dot(fwd) > 0.88,
+        `camera mode ${mode} is behind the car at heading ${heading.toFixed(2)}`,
+        `pos ${toCam.dot(fwd).toFixed(2)} look ${dir.dot(fwd).toFixed(2)}`);
+    }
+    // cockpit views sit on the car and look forward
+    for (const mode of [2, 3]) {
+      const v = { x: 0, z: 0, heading, longSpeed: 30, pitch: 0, roll: 0 };
+      rig.modeIndex = mode;
+      rig.yaw = CameraRig.chaseYaw(heading);
+      rig.smoothPos.set(0, 3, 0); rig.smoothLook.set(0, 1, 0);
+      for (let i = 0; i < 240; i++) rig.updateDrive(1 / 60, v);
+      const fwd = new THREE.Vector3(Math.cos(heading), 0, -Math.sin(heading));
+      const dir = new THREE.Vector3(); cam.getWorldDirection(dir);
+      check(dir.dot(fwd) > 0.88, `cockpit mode ${mode} looks forward at heading ${heading.toFixed(2)}`);
+    }
+  }
+}
+
 console.log(`\nGEOMETRY: ${ok} passed, ${bad} failed`);
 if (bad) process.exitCode = 1;

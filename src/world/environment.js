@@ -114,9 +114,11 @@ export class Environment {
 
     this.sun = new THREE.DirectionalLight('#fff2d8', 2.4);
     this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(2048, 2048);
+    this.sun.shadow.mapSize.set(4096, 4096);
+    this.sun.shadow.blurSamples = 8;
     const sc = this.sun.shadow.camera;
-    sc.left = -110; sc.right = 110; sc.top = 110; sc.bottom = -110;
+    // tighter frustum = much crisper car shadows (they sit right under the camera)
+    sc.left = -70; sc.right = 70; sc.top = 70; sc.bottom = -70;
     sc.near = 1; sc.far = 420;
     this.sun.shadow.bias = -0.0008;
     this.sun.shadow.normalBias = 0.035;
@@ -304,6 +306,19 @@ export class Environment {
     this.dayAmount = dayAmt;
     this.duskAmount = duskAmt;
     return { nightAmt, dayAmt, duskAmt };
+  }
+
+  // Rain darkens and glosses the tarmac. Called from the game loop with the
+  // current wetness so the whole city responds to the weather.
+  applyWetness(roadMaterial) {
+    if (!roadMaterial) return;
+    const w = clamp(this.rainIntensity * 0.85 + this.fogDensity * 0.25, 0, 1);
+    if (Math.abs((this._wetApplied ?? -1) - w) < 0.02) return;
+    this._wetApplied = w;
+    roadMaterial.roughness = 0.92 - w * 0.52;
+    roadMaterial.metalness = 0.03 + w * 0.30;
+    roadMaterial.color.setRGB(0.56 - w * 0.20, 0.58 - w * 0.20, 0.60 - w * 0.19);
+    roadMaterial.needsUpdate = false;
   }
 
   isNight() { return this.nightAmount > 0.55; }

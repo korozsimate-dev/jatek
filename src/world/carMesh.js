@@ -133,21 +133,22 @@ function loftBody(sections, def) {
       if (inArch(xc, y, z)) continue;      // leave the wheel arch open
       const a = map[s][i], b = map[s][i + 1];
       const c = map[s + 1][i], d = map[s + 1][i + 1];
-      // last ring row wraps back to the floor corner of the other side
-      idx.push(a, c, b, b, c, d);
+      // wind outward: with x increasing along +X and the ring running up the
+      // +Z flank, (a, b, c) has its normal pointing away from the body
+      idx.push(a, b, c, b, d, c);
     }
   }
   // flat floor (closes the underside between the two floor corners)
   for (let s = 0; s < S - 1; s++) {
     const a = map[s][0], b = map[s][RING - 1];
     const c = map[s + 1][0], d = map[s + 1][RING - 1];
-    idx.push(a, b, c, b, d, c);
+    idx.push(a, c, b, b, c, d);   // floor faces down
   }
   // end caps
   const capF = push(sections[0].x, (sections[0].yBot + sections[0].yTop) / 2, 0);
-  for (let i = 0; i < RING - 1; i++) idx.push(capF, map[0][i], map[0][i + 1]);
+  for (let i = 0; i < RING - 1; i++) idx.push(capF, map[0][i + 1], map[0][i]);
   const capR = push(sections[S - 1].x, (sections[S - 1].yBot + sections[S - 1].yTop) / 2, 0);
-  for (let i = 0; i < RING - 1; i++) idx.push(capR, map[S - 1][i + 1], map[S - 1][i]);
+  for (let i = 0; i < RING - 1; i++) idx.push(capR, map[S - 1][i], map[S - 1][i + 1]);
 
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
@@ -248,6 +249,34 @@ function liveryTexture(kind) {
 }
 
 // ---------- paint finishes ----------
+// A procedural flake/flip map: fine metallic sparkle plus a subtle panel
+// gradient, so the paint reads as layered paint instead of flat plastic.
+let _flakeTex = null;
+function flakeTexture() {
+  if (_flakeTex) return _flakeTex;
+  const size = 128;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = size;
+  const g = cv.getContext('2d');
+  const img = g.createImageData(size, size);
+  for (let i = 0; i < size * size; i++) {
+    // sparkle: mostly neutral, a few bright grains
+    const r = Math.random();
+    const v = 150 + (r > 0.94 ? 105 : r > 0.7 ? 40 : 0);
+    img.data[i * 4] = v;
+    img.data[i * 4 + 1] = v;
+    img.data[i * 4 + 2] = v;
+    img.data[i * 4 + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(cv);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(10, 10);
+  t.colorSpace = THREE.SRGBColorSpace;
+  _flakeTex = t;
+  return t;
+}
+
 function paintMaterial(color, finish, opts = {}) {
   const col = new THREE.Color(color);
   const mat = new THREE.MeshPhysicalMaterial({
@@ -266,6 +295,12 @@ function paintMaterial(color, finish, opts = {}) {
   } else if (finish === 'pearl') {
     mat.metalness = 0.55; mat.roughness = 0.2; mat.clearcoat = 1;
     mat.iridescence = 1; mat.iridescenceIOR = 1.6; mat.iridescenceThicknessRange = [120, 460];
+  }
+  // metallic sparkle: modulate the normal slightly so the highlight breaks up
+  if (finish === 'metallic' || finish === 'pearl') {
+    mat.roughnessMap = flakeTexture();
+    mat.roughness = finish === 'pearl' ? 0.24 : 0.30;
+    mat.envMapIntensity = 1.25;
   }
   return mat;
 }

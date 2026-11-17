@@ -125,6 +125,7 @@ export class City {
     this._mountains();
     this._props();
     this._floodLights();
+    this._buildLampHalos();
     this._mapDebug();
     return this;
   }
@@ -970,6 +971,11 @@ export class City {
   // dynamic light recycling for street lamps
   updateLights(night, camera, qualityLampCount = 4) {
     if (!this.lampLights) return;
+    // the visible halo around each lamp head, so the light has a source
+    if (this._lampHalo) {
+      this._lampHalo.visible = night > 0.25;
+      this._lampHalo.material.opacity = 0.10 + night * 0.34;
+    }
     // windows light up after dusk (the emissive maps are baked per facade)
     const glow = clamp01((night - 0.12) / 0.6);
     if (this._facadeGlow !== glow) {
@@ -1016,6 +1022,34 @@ export class City {
         light.visible = false;
       }
     }
+  }
+
+  // one batched additive quad per lamp head: reads as a glow at night
+  _buildLampHalos() {
+    const lamps = this.lampPositions;
+    if (!lamps.length) return;
+    const geo = new THREE.PlaneGeometry(2.4, 2.4);
+    const pos = new Float32Array(lamps.length * 3);
+    const uv = new Float32Array(lamps.length * 2);
+    const index = [];
+    for (let i = 0; i < lamps.length; i++) {
+      const l = lamps[i];
+      pos[i * 3] = l.x; pos[i * 3 + 1] = (l.y || 6.9) + 0.1; pos[i * 3 + 2] = l.z;
+      uv[i * 2] = 0; uv[i * 2 + 1] = 0;
+    }
+    // instanced quads are simpler and cheaper than merging: one InstancedMesh
+    const inst = new THREE.InstancedMesh(geo, MATS.lampGlow, lamps.length);
+    const m = new THREE.Matrix4();
+    for (let i = 0; i < lamps.length; i++) {
+      const l = lamps[i];
+      m.makeTranslation(l.x, (l.y || 6.9) + 0.12, l.z);
+      inst.setMatrixAt(i, m);
+    }
+    inst.instanceMatrix.needsUpdate = true;
+    inst.frustumCulled = false;
+    inst.visible = false;
+    this.group.add(inst);
+    this._lampHalo = inst;
   }
 
   update(dt, camera) {
