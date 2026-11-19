@@ -58,6 +58,7 @@ async function boot() {
         if (game.screens.current === 'brief') { game.resumeFromBrief(); game.screens.close('brief'); return; }
         if (game.screens.current === 'results') { game.closeResults(); return; }
         if (game.screens.current === 'map-screen') { game.toggleMap(); return; }
+        if (game.screens.current === 'races') { game.screens.close('races'); game.resume(); return; }
         if (game.screens.current === 'settings') { game.screens.close('settings'); game.screens.current = null; game.resume(); return; }
         if (game.screens.current === 'garage' || game.screens.current === 'tuning' || game.screens.current === 'dealership') {
           game.exitPreviewToWorld(); return;

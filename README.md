@@ -162,8 +162,14 @@ and reputation gates on the good stuff.
 **Racing.** Thirteen events: three sprints, two circuits, a highway run, two
 time attacks (the canyon switchbacks and a lap over the stunt-yard kicker), a
 drift battle apiece in Iron Yards and the hangar, a car-meet show, two
-deliveries and an invite-only underground race. Start lines never overlap
-and eight of the thirteen are open from the first minute.
+deliveries and an invite-only underground race. Eight of the thirteen are open
+from the first minute.
+
+Every start line sits on the carriageway of a real street — you can drive to it,
+and the marker on the map is on the tarmac, never on a rooftop. If you would
+rather not drive across town, **RACES** in the pause menu lists the whole
+calendar: pick an event and the car is placed on its start line with the brief
+open.
 
 **Stunt driving.** Jumps are real physics, not animation. A 26 m kicker in the
 Auto Row stunt yard launches the car ~3.5 m into the air for over a second if

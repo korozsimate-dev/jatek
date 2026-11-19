@@ -85,7 +85,7 @@ const { CarVisual } = await import('../src/world/carMesh.js');
 const { Progression } = await import('../src/game/progression.js');
 const { densifyPath, AIDriver, pathProgress } = await import('../src/game/aiDriver.js');
 const { EVENTS, blockCenters, districtOf, buildRoadNetwork, GRID, canyonRoad, POIS,
-  RAMPS, BRIDGES, surfaceHeightAt } = await import('../src/world/layout.js');
+  RAMPS, BRIDGES, surfaceHeightAt, ROAD_HW } = await import('../src/world/layout.js');
 const { defaultLook, normalizeLook, resolvedLook, BUILD_SCALE, LOOK_OPTIONS, OUTFITS } = await import('../src/data/look.js');
 const { Player } = await import('../src/game/player.js');
 const { Settings } = await import('../src/core/settings.js');
@@ -714,6 +714,30 @@ section('more races on the map');
       const d = Math.hypot(a.x - b.x, a.z - b.z);
       ok(d > 15, `start lines ${a.id} / ${b.id} do not overlap (${d.toFixed(0)} m)`);
     }
+  }
+  // every start line must be a place you can simply drive to and park on:
+  // flat street, wide enough for a grid, and nothing solid within a car length
+  const flat = (x, z) => surfaceHeightAt(x, z) < 0.3;
+  const blockAt = (x, z) => blockCenters().find((bl) => Math.abs(x - bl.cx) < bl.size / 2 && Math.abs(z - bl.cz) < bl.size / 2);
+  for (const ev of EVENTS) {
+    ok(flat(ev.x, ev.z), `${ev.id} starts on flat ground (not on a ramp or deck)`);
+    ok(!blockAt(ev.x, ev.z), `${ev.id} starts on the street, not inside a block`);
+    let nearest = Infinity;
+    for (const c of city.colliderList) {
+      if (c.disabled || (c.height ?? 0) < 2.5 || (c.baseY ?? 0) > 1) continue;
+      const dx = Math.max(c.minX - ev.x, 0, ev.x - c.maxX);
+      const dz = Math.max(c.minZ - ev.z, 0, ev.z - c.maxZ);
+      nearest = Math.min(nearest, Math.hypot(dx, dz));
+    }
+    ok(nearest > 6, `${ev.id} is not wedged against a wall (${nearest.toFixed(1)} m)`);
+    // and the first leg of the route has to point somewhere sensible
+    const leg = Math.hypot(ev.route[0][0] - ev.x, ev.route[0][1] - ev.z);
+    ok(leg > 4 && leg < 260, `${ev.id} first leg is a drivable distance (${leg.toFixed(0)} m)`);
+    // the actual complaint: the marker must sit on a street you can drive up
+    // to, not in the middle of a block (which paints it on the rooftops)
+    let streetDistance = Infinity;
+    for (const g of GRID) streetDistance = Math.min(streetDistance, Math.abs(ev.x - g), Math.abs(ev.z - g));
+    ok(streetDistance <= ROAD_HW, `${ev.id} start marker is on the carriageway (${streetDistance.toFixed(1)} m from the centre line)`);
   }
   const prog7 = new Progression();
   prog7.newGame('CALENDAR');

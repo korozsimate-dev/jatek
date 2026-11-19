@@ -58,9 +58,9 @@ export const POIS = {
   meetDock: { x: 240, z: 390, name: 'DOCK MEET', type: 'meet' },
   meetLot: { x: -120, z: 390, name: 'PALM LOT MEET', type: 'meet' },
   driftYard: { x: 300, z: 360, name: 'IRON YARD DRIFT', type: 'drift' },
-  gas1: { x: -60, z: 300, name: 'VELOR FUEL', type: 'gas' },
-  gas2: { x: 300, z: -60, name: 'SUNSET GAS', type: 'gas' },
-  gas3: { x: -180, z: -300, name: 'CANYON STOP', type: 'gas' },
+  gas1: { x: 6, z: 240, name: 'VELOR FUEL', type: 'gas' },
+  gas2: { x: 306, z: -6, name: 'SUNSET GAS', type: 'gas' },
+  gas3: { x: -174, z: -246, name: 'CANYON STOP', type: 'gas' },
   garage2: { x: 180, z: -180, name: 'MIDTOWN GARAGE', type: 'garage' },
   driver: { x: -282, z: 170, name: 'CUTS & CHROME', type: 'driver' },
 };
@@ -172,14 +172,16 @@ export const EVENTS = [
     x: -60, z: 300, heading: Math.PI / 2,
     fee: 0, prize: 2400, rep: 3, repReq: 0, laps: 1, opponents: 3,
     desc: 'A point-to-point blast from the Strip up through Nightlife and back down the boulevard. Three rivals, no cameras.',
-    route: [[-60, 180], [-60, 60], [-60, -60], [-60, -180], [60, -180], [180, -180], [180, -60], [180, 60], [180, 180], [180, 300]],
+    route: [[-60, 180], [-60, 60], [-60, -60], [-60, -180], [60, -180], [180, -180], [180, -60], [180, 60], [180, 180], [180, 300], [60, 300], [-60, 300]],
   },
   {
     id: 'circuit_downtown', type: 'circuit', name: 'DOWNTOWN GP', district: 'DOWNTOWN',
     x: 60, z: 60, heading: -Math.PI / 2,
     fee: 800, prize: 5200, rep: 6, repReq: 5, laps: 2, opponents: 4,
     desc: 'Two laps around the towers. Long straights, hard 90-degree corners and a lot of concrete to hit.',
-    route: [[-60, 60], [-60, -180], [180, -180], [180, 120], [60, 120], [60, 60], [60, -60], [-60, -60]],
+    // a clean rectangle: every leg runs down a street and the closing leg
+    // comes home along z = 60 (no diagonal shortcuts across the blocks)
+    route: [[-60, 60], [-60, -180], [180, -180], [180, 60]],
   },
   {
     id: 'circuit_highway', type: 'highway', name: 'SUNSET FREEWAY RUN', district: 'HIGHWAY',
@@ -192,24 +194,24 @@ export const EVENTS = [
   },
   {
     id: 'timeattack_canyon', type: 'timeattack', name: 'CANYON TIME ATTACK', district: 'CANYON HILLS',
-    x: -372, z: -352, heading: 0,
+    x: -360, z: -300, heading: Math.PI,
     fee: 400, prize: 3600, rep: 8, repReq: 8, laps: 2, opponents: 0, targetTime: 74,
     desc: 'Solo run around the switchback canyon loop. Beat the target time to take the purse.',
-    route: [[-404, -396], [-420, -450], [-410, -486], [-378, -480], [-362, -434], [-374, -388], [-404, -350], [-360, -332], [-410, -376], [-390, -420], [-372, -352]],
+    route: [[-404, -396], [-420, -450], [-410, -486], [-378, -480], [-362, -434], [-374, -388], [-404, -350], [-360, -332], [-390, -363]],
   },
   {
     id: 'drift_yard', type: 'drift', name: 'IRON YARD DRIFT BATTLE', district: 'IRON YARDS',
-    x: 300, z: 360, heading: 0,
+    x: 300, z: 300, heading: Math.PI,
     fee: 300, prize: 3000, rep: 5, repReq: 2, laps: 3, opponents: 0, duration: 60, targetScore: 12000,
     desc: 'Sixty seconds in the container yard. Link drifts, keep the multiplier alive and beat the target score.',
-    route: [[240, 360], [300, 330], [360, 360], [300, 390]],
+    route: [[300, 340], [300, 390], [306, 360]],
   },
   {
     id: 'meet_show', type: 'meet', name: 'DOCK MEET SHOWDOWN', district: 'VELOR HARBOR',
-    x: 240, z: 390, heading: 0,
+    x: 240, z: 420, heading: Math.PI,
     fee: 0, prize: 2200, rep: 4, repReq: 3, laps: 1, opponents: 0,
     desc: 'Show your build at the dockside meet. Judges score paint, wheels, stance and aero — then it turns into a 1-lap sprint.',
-    route: [[240, 330], [300, 300], [360, 360], [300, 420], [240, 390]],
+    route: [[240, 300], [300, 300], [300, 420], [180, 420]],
   },
   {
     id: 'underground_night', type: 'sprint', name: 'UNDERGROUND: BLACKOUT', district: 'NIGHTLIFE',
@@ -223,14 +225,14 @@ export const EVENTS = [
     x: 150, z: 300, heading: Math.PI / 2,
     fee: 0, prize: 2000, rep: 3, repReq: 0, laps: 1, opponents: 0, targetTime: 62,
     desc: 'Straight off the street and up the kicker in the stunt yard, then a full lap over the Auto Row overpass. Hits the ramp flat out or you are already too slow.',
-    route: [[150, 292], [150, 266], [150, 236], [128, 220], [120, 196], [120, 176], [120, 152], [120, 120], [60, 120], [60, 180], [60, 240], [60, 300], [110, 300]],
+    route: [[150, 292], [150, 272], [146, 258], [136, 244], [122, 232], [120, 216], [120, 200], [120, 180], [120, 152], [60, 120], [60, 180], [60, 300], [110, 300]],
   },
   {
     id: 'circuit_autos', type: 'circuit', name: 'AUTO ROW CIRCUIT', district: 'AUTO ROW',
     x: 180, z: 300, heading: 0,
     fee: 600, prize: 4200, rep: 5, repReq: 4, laps: 2, opponents: 4,
     desc: 'Two laps of the showroom district. Wide boulevards, four 90-degree corners and a freeway overpass to duck under.',
-    route: [[300, 300], [300, 180], [180, 180], [120, 180], [60, 180], [60, 300], [180, 300]],
+    route: [[300, 300], [300, 180], [180, 180], [120, 180], [60, 180], [60, 300]],
   },
   {
     id: 'sprint_palms', type: 'sprint', name: 'PALM HEIGHTS RUN', district: 'PALM HEIGHTS',
@@ -241,24 +243,24 @@ export const EVENTS = [
   },
   {
     id: 'drift_hangar', type: 'drift', name: 'HANGAR 16 DRIFT', district: 'AUTO ROW',
-    x: 120, z: 240, heading: 0,
+    x: 120, z: 296, heading: Math.PI / 2,
     fee: 200, prize: 3400, rep: 6, repReq: 3, laps: 2, opponents: 0, duration: 60, targetScore: 15000,
     desc: 'The concrete yard behind the showrooms, with a kicker in the middle of it. Link the figure-eight and keep the multiplier alive.',
-    route: [[120, 212], [156, 240], [120, 272], [84, 240], [120, 212]],
+    route: [[120, 276], [150, 250], [120, 216], [86, 250]],
   },
   {
     id: 'delivery_2', type: 'delivery', name: 'COLD CHAIN', district: 'IRON YARDS',
     x: 120, z: 420, heading: Math.PI,
     fee: 0, prize: 2100, rep: 3, repReq: 2, laps: 1, opponents: 0, targetTime: 78,
     desc: 'A second run for the dock foreman: the crate has to reach the Torque Lab before the ice melts.',
-    route: [[180, 390], [240, 300], [300, 240], [240, 240]],
+    route: [[180, 420], [180, 300], [240, 300], [240, 240]],
   },
   {
     id: 'delivery_1', type: 'delivery', name: 'HOT CARGO', district: 'VELOR HARBOR',
     x: 60, z: 390, heading: 0,
     fee: 0, prize: 1400, rep: 2, repReq: 0, laps: 1, opponents: 0, targetTime: 70,
     desc: 'The dock foreman needs a package at the dealership before the cops notice. Beat the clock — and avoid the patrol cars.',
-    route: [[120, 300], [180, 180], [120, 120], [60, 180]],
+    route: [[120, 300], [180, 180], [120, 300], [60, 180]],
   },
 ];
 
@@ -278,10 +280,13 @@ export const LOTS = [
   { id: 'overpassLot', x: 120, z: 120, w: 92, d: 92, kind: 'stunt' },
 ];
 
+// A forecourt is 20 x 13 m with canopy columns at +-8.5 m and a kiosk at
+// -12 m, so it has to sit in the open middle of a block: on a crossing the
+// columns and pumps ended up standing in the carriageway.
 export const GAS_STATIONS = [
-  { x: -60, z: 300 },
-  { x: 300, z: -60 },
-  { x: -180, z: -300 },
+  { x: 6, z: 240 },
+  { x: 306, z: -6 },
+  { x: -174, z: -246 },
 ];
 
 // ----- traffic network ---------------------------------------------------

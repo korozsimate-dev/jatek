@@ -352,13 +352,12 @@ export function buildMeetLot(b, x, z, w, d, seed, name) {
   for (const sx of [-w * 0.42, w * 0.42]) {
     for (const sz of [-d * 0.4, d * 0.4]) {
       b.cyl('metal', 0.16, 0.2, 9, x + sx, 0.17, z + sz, 6);
-      b.addColliderBox(x + sx, z + sz, 0.4, 0.4, 0, 9);
       b.boxAt('lampHead', 2.4, 0.5, 0.3, x + sx, 9.2, z + sz);
     }
   }
-  // graffiti wall
+  // graffiti wall — scenery only: at a lot this size it would block the only
+  // road entrance to the meet
   b.box('concrete', w * 1.02, 3.2, 0.6, x, 0.17, z - d / 2 - 1);
-  b.addColliderBox(x, z - d / 2 - 1, w * 1.02, 0.6, 0, 3.4);
   for (let i = 0; i < 5; i++) {
     b.boxAt(`neon:${['pink', 'cyan', 'purple', 'amber', 'red'][i]}`, w * 0.12, 1.2, 0.06,
       x - w * 0.36 + i * w * 0.18, 1.9, z - d / 2 - 0.68);

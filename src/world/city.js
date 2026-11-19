@@ -258,20 +258,26 @@ export class City {
 
     // street lamps along roads (outside the pad, on the kerb)
     const onCanyonLamp = this._canyonOnTrack || (() => false);
+    // Both posts of a pair must stand on the KERB of the same street. The old
+    // code offset the second post 26 m along the road, which parked it in the
+    // middle of the next crossing street as an invisible 0.4 m pole.
     for (const x of GRID) {
       for (let z = -RING; z <= RING; z += 52) {
         if (GRID.some((gz) => Math.abs(gz - z) < 14)) continue;
-        if (onCanyonLamp(x - ROAD_HW - 1.5, z, 3) || onCanyonLamp(x + ROAD_HW + 1.5, z + 26, 3)) continue;
+        // never stand a post (or its collider) in the ring carriageway
+        if (Math.abs(z) > RING - RING_HW - 4) continue;
+        if (onCanyonLamp(x - ROAD_HW - 1.5, z, 3) || onCanyonLamp(x + ROAD_HW + 1.5, z, 3)) continue;
         buildLampPost(b, x - ROAD_HW - 1.5, z, -Math.PI / 2, this.lampPositions);
-        buildLampPost(b, x + ROAD_HW + 1.5, z + 26, Math.PI / 2, this.lampPositions);
+        buildLampPost(b, x + ROAD_HW + 1.5, z, Math.PI / 2, this.lampPositions);
       }
     }
     for (const z of GRID) {
       for (let x = -RING; x <= RING; x += 52) {
         if (GRID.some((gx) => Math.abs(gx - x) < 14)) continue;
-        if (onCanyonLamp(x, z - ROAD_HW - 1.5, 3) || onCanyonLamp(x + 26, z + ROAD_HW + 1.5, 3)) continue;
+        if (Math.abs(x) > RING - RING_HW - 4) continue;
+        if (onCanyonLamp(x, z - ROAD_HW - 1.5, 3) || onCanyonLamp(x, z + ROAD_HW + 1.5, 3)) continue;
         buildLampPost(b, x, z - ROAD_HW - 1.5, Math.PI, this.lampPositions);
-        buildLampPost(b, x + 26, z + ROAD_HW + 1.5, 0, this.lampPositions);
+        buildLampPost(b, x, z + ROAD_HW + 1.5, 0, this.lampPositions);
       }
     }
     // traffic lights at the main intersections
@@ -755,11 +761,32 @@ export class City {
         // a race that loops back over its own start would be blocked by it.
         b.cyl('darkMetal', 0.22, 0.3, 7.5, ev.x + ox, 0.02, ev.z + oz, 8);
       }
-      const banner = new THREE.BoxGeometry(0.2, 1.4, 15.5);
-      banner.rotateY(rot);
-      banner.translate(ev.x, 6.9, ev.z);
-      b.push('neon:amber', banner);
-      this._neonLight(ev.x, 6.5, ev.z, 'amber', 3.5);
+      // A start gate, not a billboard: a slim truss across the top, lit
+      // uprights on the kerbs, and a chequered line painted on the tarmac.
+      // (A 15 m opaque banner read as a wall you had to drive through.)
+      const beam = new THREE.BoxGeometry(0.16, 0.34, 15.6);
+      beam.rotateY(rot);
+      beam.translate(ev.x, 7.35, ev.z);
+      b.push('darkMetal', beam);
+      const strip = new THREE.BoxGeometry(0.1, 0.16, 15.6);
+      strip.rotateY(rot);
+      strip.translate(ev.x, 7.1, ev.z);
+      b.push('neon:amber', strip);
+      for (const sgn of [1, -1]) {
+        const ox = Math.sin(rot) * sgn * 7.5, oz = Math.cos(rot) * sgn * 7.5;
+        const post = new THREE.BoxGeometry(0.18, 1.6, 0.18);
+        post.translate(ev.x + ox, 6.4, ev.z + oz);
+        b.push('neon:amber', post);
+      }
+      // chequered start line on the road itself
+      for (let k = 0; k < 8; k++) {
+        const sq = new THREE.PlaneGeometry(0.9, 1.5);
+        sq.rotateX(-Math.PI / 2);
+        sq.rotateY(rot);
+        sq.translate(ev.x + Math.sin(rot) * (k - 3.5) * 0.9, 0.03, ev.z + Math.cos(rot) * (k - 3.5) * 0.9);
+        b.push(k % 2 ? 'paintWhite' : 'darkMetal', sq);
+      }
+      this._neonLight(ev.x, 6.5, ev.z, 'amber', 3.5, 3.2);
     }
   }
 
@@ -925,12 +952,12 @@ export class City {
     });
   }
 
-  _neonLight(x, y, z, colorName, intensity = 4) {
+  _neonLight(x, y, z, colorName, intensity = 4, size = 9) {
     const colors = { cyan: '#25e0d0', pink: '#ff2f92', amber: '#ffb300', purple: '#a56bff', red: '#ff3b30', white: '#e8f4ff' };
     this.neonLights.push({ pos: new THREE.Vector3(x, y, z), color: colors[colorName] || '#ffffff', intensity });
     // glow sprite for the sign itself
     const spr = new THREE.Mesh(
-      new THREE.PlaneGeometry(9, 9),
+      new THREE.PlaneGeometry(size, size),
       new THREE.MeshBasicMaterial({
         color: colors[colorName] || '#ffffff', transparent: true, opacity: 0.10,
         blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,

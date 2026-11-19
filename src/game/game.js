@@ -504,6 +504,35 @@ export class Game {
     this.input.requestLock();
   }
 
+  // Put the car on an event's start line and open its brief. This is the
+  // "go there now" path used by the race calendar: you never have to find a
+  // marker in the city to enter an event.
+  jumpToEvent(ev) {
+    if (!ev) return;
+    if (this.race.active) { this.hud.toast('FINISH THE CURRENT EVENT FIRST', 'warn'); return; }
+    if (!this.progression.isUnlocked(ev)) {
+      this.audio.ui('error');
+      this.hud.toast(`NEEDS ${ev.repReq} REP`, 'warn');
+      return;
+    }
+    this.screens.showOnly(null);
+    this.screens.current = null;
+    this.paused = false;
+    if (!this.playerInCar) this.putPlayerInCar();
+    const v = this.playerVehicle;
+    if (!v) return;
+    v.reset(ev.x, ev.z, ev.heading || 0);
+    v.visual.group.position.set(ev.x, 0.16, ev.z);
+    v.visual.group.rotation.y = ev.heading || 0;
+    if (this.cameraRig) {
+      this.cameraRig.yaw = CameraRig.chaseYaw(ev.heading || 0);
+      this.cameraRig.smoothPos.set(ev.x + Math.sin(this.cameraRig.yaw) * 8, 3.4, ev.z + Math.cos(this.cameraRig.yaw) * 8);
+    }
+    this.state = 'explore';
+    this.hud.toast(`${ev.name} — READY ON THE LINE`, 'money');
+    this.openBrief(ev);
+  }
+
   startEventFromBrief() {
     const ev = this.currentEvent;
     if (!ev) return;

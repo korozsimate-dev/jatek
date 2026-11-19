@@ -354,6 +354,39 @@ frames(8);
 ok(game.playerVehicle.def.id === 'coupe_slide', 'world vehicle swapped to the new car', game.playerVehicle.def.id);
 
 // ============================================================
+step('race calendar: every event is one click away');
+{
+  // the pause menu offers a race list, so no event depends on finding a
+  // marker in the city first
+  game.paused = false;
+  game.pause();
+  const racesBtn = document.getElementById('btn-pause-races');
+  ok(!!racesBtn, 'the pause menu offers a race calendar');
+  racesBtn.click();
+  ok(sc.current === 'races', 'the race calendar opens from the pause menu');
+  const list = document.getElementById('race-list');
+  ok(list.children.length === EVENTS.length, `the calendar lists every event (${list.children.length}/${EVENTS.length})`);
+  const unlocked = EVENTS.filter((e) => game.progression.isUnlocked(e));
+  const locked = EVENTS.filter((e) => !game.progression.isUnlocked(e));
+  const cards = list.children;
+  ok(cards.filter((c) => !c.disabled).length === unlocked.length, 'unlocked events are clickable');
+  ok(cards.filter((c) => c.disabled).length === locked.length, 'locked events are greyed out');
+  // picking one drops you on its start line with the brief open
+  const pick = unlocked.find((e) => e.id === 'sprint_palms');
+  const card = cards.find((c) => c.dataset.eventId === pick.id);
+  ok(!!card, 'the card knows which event it is');
+  card.click();
+  ok(game.currentEvent && game.currentEvent.id === pick.id, 'the brief open is for the chosen event');
+  ok(Math.hypot(game.playerVehicle.x - pick.x, game.playerVehicle.z - pick.z) < 0.5,
+    `the car is placed on the start line (${game.playerVehicle.x.toFixed(0)},${game.playerVehicle.z.toFixed(0)})`);
+  ok(game.playerInCar, 'the driver is in the car at the line');
+  ok(sc.current === 'brief', 'the brief is waiting for START');
+  game.resumeFromBrief();
+  sc.close('brief');
+  frames(4);
+}
+
+// ============================================================
 step('race with opponents');
 const ev = EVENTS.find((e) => e.id === 'circuit_downtown');
 game.openBrief(ev);

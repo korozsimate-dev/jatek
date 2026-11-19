@@ -132,6 +132,8 @@
     <div class="modal panel-metal">
       <h2>PAUSED</h2>
       <button id="btn-resume" class="menu-btn primary"><span class="mb-label">RESUME</span></button>
+      <button id="btn-pause-races" class="menu-btn"><span class="mb-label">RACES</span>
+        <span class="mb-sub">jump straight to a start line</span></button>
       <button id="btn-pause-garage" class="menu-btn"><span class="mb-label">GARAGE</span></button>
       <button id="btn-pause-settings" class="menu-btn"><span class="mb-label">SETTINGS</span></button>
       <button id="btn-pause-save" class="menu-btn"><span class="mb-label">SAVE GAME</span></button>
@@ -400,6 +402,22 @@
       <canvas id="bigmap" width="900" height="900"></canvas>
       <div class="modal-actions"><button id="btn-map-close" class="menu-btn primary small"><span class="mb-label">CLOSE</span></button></div>
     </div>
+  </div>
+
+  <!-- ============ RACE PICKER ============ -->
+  <div id="races" class="screen ui-screen hidden">
+    <div class="garage-head">
+      <div class="gh-left">
+        <div class="gh-title">RACE CALENDAR <span class="lab-tag">GO ANY TIME</span></div>
+        <div class="gh-sub">PICK AN EVENT — THE CAR IS PLACED ON THE START LINE</div>
+      </div>
+      <div class="gh-right">
+        <div class="gh-stat"><span>REP</span><b id="races-rep">0</b></div>
+        <div class="gh-stat"><span>CASH</span><b id="races-money">$0</b></div>
+        <button id="btn-races-close" class="icon-btn">✕</button>
+      </div>
+    </div>
+    <div class="race-list panel-glass" id="race-list"></div>
   </div>
 
   <!-- ============ RACE RESULT ============ -->

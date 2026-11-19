@@ -39,6 +39,7 @@ export class Screens {
       case 'settings': this.syncSettings(); break;
       case 'pause': break;
       case 'map-screen': this.game.hud.openBigMap(this.game.getFocusPos()); break;
+      case 'races': this.openRaces(); break;
       case 'results': if (opts.result) this.showResult(opts.result); break;
       case 'brief': if (opts.ev) this.showBrief(opts.ev); break;
       case 'credits': break;
@@ -56,7 +57,7 @@ export class Screens {
 
   // hide every overlay screen (the pause menu is a separate layer)
   showOnly(name) {
-    for (const id of ['menu', 'pause', 'settings', 'credits', 'garage', 'tuning', 'dealership', 'character', 'map-screen', 'results', 'brief']) {
+    for (const id of ['menu', 'pause', 'settings', 'credits', 'garage', 'tuning', 'dealership', 'character', 'map-screen', 'results', 'brief', 'races']) {
       this.hide(id);
     }
     this.current = null;
@@ -663,6 +664,43 @@ export class Screens {
     $('btn-result-retry').style.display = success && position === 1 ? '' : '';
   }
 
+  // ---------------- race calendar ----------------
+  // Every event is reachable from here: picking one puts the car on its start
+  // line and opens the brief. No cross-city drive, no hunting for a marker.
+  openRaces() {
+    const g = this.game;
+    const p = g.progression;
+    $('races-rep').textContent = p.rep;
+    $('races-money').textContent = formatMoney(p.money);
+    const list = $('race-list');
+    const focus = g.getFocusPos();
+    list.innerHTML = '';
+    const sorted = [...EVENTS].sort((a, b) => (a.repReq || 0) - (b.repReq || 0));
+    for (const ev of sorted) {
+      const unlocked = p.isUnlocked(ev);
+      const d = Math.round(Math.hypot(ev.x - focus.x, ev.z - focus.z));
+      const card = document.createElement('button');
+      card.className = 'race-card' + (unlocked ? '' : ' locked');
+      card.dataset.eventId = ev.id;
+      const rec = p.bestFor(ev.id);
+      const bits = [`${ev.laps || 1} LAP${(ev.laps || 1) > 1 ? 'S' : ''}`, `${ev.route.length} CP`];
+      if (ev.opponents) bits.push(`${ev.opponents} RIVALS`);
+      card.innerHTML = `
+        <div class="rc-top"><span class="rc-name">${ev.name}</span><span class="rc-type">${ev.type.toUpperCase()}</span></div>
+        <div class="rc-sub">${ev.district} · ${bits.join(' · ')}</div>
+        <div class="rc-stats"><span>PRIZE <b>${formatMoney(ev.prize)}</b></span><span>ENTRY ${ev.fee ? formatMoney(ev.fee) : 'FREE'}</span></div>
+        ${unlocked ? `<div class="rc-dist">${d} m away${rec ? ' · best ' + formatTime(rec.time) : ''}</div>`
+          : `<div class="rc-req">NEEDS ${ev.repReq} REP</div>`}`;
+      card.disabled = !unlocked;
+      card.addEventListener('click', () => {
+        const call = () => { g.audio.ui('click'); g.jumpToEvent(ev); };
+        if (card.disabled) { g.audio.ui('error'); return; }
+        call();
+      });
+      list.appendChild(card);
+    }
+  }
+
   // ---------------- event brief ----------------
   showBrief(ev) {
     this._briefEv = ev;
@@ -710,6 +748,8 @@ export class Screens {
 
     // pause
     on('btn-resume', () => g.resume());
+    on('btn-pause-races', () => { this.showOnly('races'); });
+    on('btn-races-close', () => { this.close('races'); g.resume(); });
     on('btn-pause-garage', () => { g.paused = false; this.showOnly('garage'); });
     on('btn-pause-settings', () => { this.settingsScreenTarget = 'pause'; this.open('settings'); });
     on('btn-pause-save', () => { g.saveGame(); this.game.hud.toast('GAME SAVED', 'money'); });
