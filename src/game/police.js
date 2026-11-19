@@ -223,7 +223,7 @@ export class PoliceSystem {
       }
       this._driveCop(u, dt, player, d);
       // update visuals
-      u.visual.group.position.set(v.x, 0, v.z);
+      u.visual.group.position.set(v.x, 0.16 + (v.y || 0), v.z);
       u.visual.group.rotation.y = v.heading;
       u.visual.update(dt, {
         steer: clamp(v.steerAngle * 1.8, -0.75, 0.75),

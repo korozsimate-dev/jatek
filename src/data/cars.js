@@ -118,6 +118,19 @@ export const CAR_DEFS = [
       roofH: 0.52, style: 'muscle' },
   },
   {
+    id: 'coupe_bavar', name: 'Bavar M3 Coupé', brand: 'Bavar', year: 2003,
+    class: 'SPORTS COUPÉ', drivetrain: 'RWD', price: 26000, repReq: 0,
+    hp: 343, weight: 1495, topSpeed: 250, accel: 5.2, handling: 84, brake: 82,
+    gears: 6, engine: 'i6', sound: 'i6', defaultColor: '#1846a8',
+    // The starter car: a straight-six rear-drive coupé in that deep metallic
+    // blue, with the wide arches, twin-kidney nose and 19" double spokes.
+    body: { type: 'coupe', length: 4.49, width: 1.78, height: 1.37, wheelbase: 2.73, track: 1.54,
+      wheelR: 0.33, wheelW: 0.25, rideHeight: 0.26, hoodLen: 1.42, cabinLen: 1.62, cabinOffset: -0.18,
+      roofH: 0.60, style: 'german', spoiler: false,
+      // signature details: twin kidney grille, flared arches, side gills
+      grille: 'kidney', gills: true, archFlare: 0.034, quadTip: true },
+  },
+  {
     id: 'muscle_coronet', name: 'Coronet Hardtop', brand: 'Coronet', year: 1966,
     class: 'CLASSIC CRUISER', drivetrain: 'RWD', price: 7200, repReq: 0,
     hp: 198, weight: 1480, topSpeed: 196, accel: 9.2, handling: 48, brake: 46,

@@ -2,8 +2,13 @@
 // Save data + progression (money, rep, cars, modifications, records)
 // ============================================================
 import { CONFIG } from '../config.js';
-import { CAR_BY_ID, PARTS, defaultMods, cloneMods, computeStats, carValue, rankFor } from '../data/cars.js';
+import { CAR_DEFS, CAR_BY_ID, PARTS, defaultMods, cloneMods, computeStats, carValue, rankFor } from '../data/cars.js';
 import { formatMoney } from '../core/util.js';
+import { defaultLook, normalizeLook } from '../data/look.js';
+
+// The car you start the game in — a rear-drive straight-six coupé in Estoril blue.
+export const STARTER_CAR_ID = 'coupe_bavar';
+export const STARTER_COLOR_NAME = 'Estoril Blue';
 
 export class Progression {
   constructor() {
@@ -15,14 +20,14 @@ export class Progression {
   emit(type, payload) { for (const l of this.listeners) l(type, payload); }
 
   newGame(name = 'DRIVER') {
-    const startDef = CAR_BY_ID['muscle_coronet'];
+    const startDef = CAR_BY_ID[STARTER_CAR_ID] || CAR_DEFS[0];
     const car = {
       uid: 'car_' + Date.now() + '_0',
-      defId: 'muscle_coronet',
+      defId: startDef.id,
       mods: defaultMods(startDef),
       owned: { ...defaultOwnedFor(startDef) },
       plate: makePlate(),
-      colorName: 'Fern Green',
+      colorName: STARTER_COLOR_NAME,
     };
     this.data = {
       version: CONFIG.version,
@@ -42,7 +47,9 @@ export class Progression {
       distance: 0,
       busts: 0,
       escapes: 0,
-      unlockedEvents: ['sprint_neon', 'circuit_downtown', 'drift_yard', 'delivery_1', 'meet_show'],
+      unlockedEvents: ['sprint_neon', 'circuit_downtown', 'drift_yard', 'delivery_1', 'meet_show',
+        'circuit_autos', 'sprint_stunt', 'delivery_2'],
+      look: defaultLook(),
       seenIntro: false,
       position: null,
       settingsMigrated: true,
@@ -66,8 +73,11 @@ export class Progression {
       for (const c of d.cars) {
         if (!c.mods) c.mods = defaultMods(CAR_BY_ID[c.defId]);
         if (!c.owned) c.owned = defaultOwnedFor(CAR_BY_ID[c.defId]);
-        if (!CAR_BY_ID[c.defId]) c.defId = 'muscle_coronet';
+        if (!CAR_BY_ID[c.defId]) c.defId = STARTER_CAR_ID;
       }
+      if (!d.look) d.look = defaultLook();
+      d.look = normalizeLook(d.look);
+      if (!Array.isArray(d.unlockedEvents)) d.unlockedEvents = [];
       this.data = d;
       return d;
     } catch (e) { return null; }
@@ -97,6 +107,16 @@ export class Progression {
   collectionValue() {
     return this.cars.reduce((sum, c) => sum + carValue(CAR_BY_ID[c.defId], c.mods), 0);
   }
+
+  // ---------------- driver appearance ----------------
+  get look() { return normalizeLook(this.data?.look); }
+  setLook(patch) {
+    if (!this.data) return this.look;
+    this.data.look = normalizeLook({ ...this.look, ...(patch || {}) });
+    this.emit('look', this.data.look);
+    return this.data.look;
+  }
+  resetLook() { return this.setLook(defaultLook()); }
 
   // ---------------- money ----------------
   addMoney(n, silent = false) {

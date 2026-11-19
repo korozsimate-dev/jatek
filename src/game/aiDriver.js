@@ -233,10 +233,16 @@ export class AIDriver {
         if (step < -total * 0.5) step += total;
         this._lapDist += Math.max(0, step);
       }
+      // (recorded before _lastS is advanced, so the step reflects this frame)
+      let stepProg = this.s - (this._lastS ?? this.s);
       this._lastS = this.s;
       const prog = (this.s % total) / total;
       if (prog > 0.5) this.lapArmed = true;
-      else if (this.lapArmed && prog < 0.2) { this.lap++; this.lapArmed = false; }
+      else if (this.lapArmed && prog < 0.2) {
+        // ignore a backwards wrap (reversing over the line is not a lap)
+        if (stepProg > -total * 0.5) this.lap++;
+        this.lapArmed = false;
+      }
     } else {
       if (newS > this.s - SAMPLE * 2) this.s = newS;
       this._lastS = this.s;
@@ -273,6 +279,12 @@ export class AIDriver {
     if (!this.n) return;
     this._project();
     const speed = Math.abs(v.longSpeed);
+    // a car in the air cannot steer, brake or accelerate: hold the wheel
+    // straight and let the landing sort itself out
+    if (v.airborne) {
+      v.update(dt, { throttle: 0, brake: 0, steer: this.steerSmooth * 0.5, handbrake: 0 }, ctx.world);
+      return;
+    }
 
     if (this.reverseTimer > 0) {
       this.reverseTimer -= dt;

@@ -148,8 +148,9 @@ ok(game.state === 'explore', 'new game enters the world');
 ok(game.playerInCar === false, 'player starts on foot');
 ok(game.worldActive === true, 'world is active');
 ok(!!game.playerVehicle, 'player vehicle exists');
-ok(game.progression.money === 2500, 'starting cash correct');
-ok(game.hud.el.money.textContent.includes('2,500'), 'HUD shows the cash', game.hud.el.money.textContent);
+ok(game.progression.money === 40000, 'starting cash correct');
+ok(game.hud.el.money.textContent.includes('40,000'), 'HUD shows the cash', game.hud.el.money.textContent);
+ok(game.progression.activeCar().defId === 'coupe_bavar', 'the new game starts in the blue coupé');
 
 // ============================================================
 step('walking');

@@ -115,6 +115,7 @@
         <button id="btn-continue" class="menu-btn primary" disabled><span class="mb-label">CONTINUE</span><span class="mb-sub">Load last save</span></button>
         <button id="btn-newgame" class="menu-btn"><span class="mb-label">NEW GAME</span><span class="mb-sub">Start from the bottom</span></button>
         <button id="btn-garage-menu" class="menu-btn"><span class="mb-label">GARAGE</span><span class="mb-sub">Cars · tuning · collection</span></button>
+        <button id="btn-driver-menu" class="menu-btn"><span class="mb-label">CHARACTER</span><span class="mb-sub">Look, hair, outfit, build</span></button>
         <button id="btn-dealer-menu" class="menu-btn"><span class="mb-label">DEALERSHIP</span><span class="mb-sub">Buy your next ride</span></button>
         <button id="btn-settings-menu" class="menu-btn"><span class="mb-label">SETTINGS</span><span class="mb-sub">Video · audio · controls</span></button>
         <button id="btn-credits" class="menu-btn"><span class="mb-label">CONTROLS</span><span class="mb-sub">How to play</span></button>
@@ -277,9 +278,40 @@
       <div class="garage-actions">
         <button id="btn-garage-drive" class="menu-btn primary small"><span class="mb-label">DRIVE</span></button>
         <button id="btn-garage-tune" class="menu-btn small"><span class="mb-label">TUNE</span></button>
+        <button id="btn-garage-driver" class="menu-btn small"><span class="mb-label">DRIVER</span></button>
         <button id="btn-garage-sell" class="menu-btn small danger"><span class="mb-label">SELL</span></button>
       </div>
       <div class="garage-view-hint">Drag to rotate · scroll to zoom</div>
+    </div>
+  </div>
+
+  <!-- ============ DRIVER / CHARACTER CUSTOMISATION ============ -->
+  <div id="character" class="screen ui-screen hidden">
+    <div class="garage-head">
+      <div class="gh-left">
+        <div class="gh-title">THE DRIVER <span class="lab-tag">BARBER &amp; TAILOR</span></div>
+        <div class="gh-sub">WHAT THE STREETS SEE</div>
+      </div>
+      <div class="gh-right">
+        <div class="gh-stat"><span>WALLET</span><b id="char-money">$0</b></div>
+        <button id="btn-char-close" class="icon-btn">✕</button>
+      </div>
+    </div>
+    <div class="char-left panel-glass">
+      <div class="panel-title">LOOK</div>
+      <div id="char-tabs" class="tuning-tabs"></div>
+      <div class="garage-hint">Changes apply live · saved on exit</div>
+    </div>
+    <div class="char-right panel-glass">
+      <div id="char-cat-title" class="car-title">BUILD</div>
+      <div id="char-cat-sub" class="car-class">—</div>
+      <div id="char-options" class="char-options"></div>
+      <div class="char-actions">
+        <button id="btn-char-preview" class="menu-btn small"><span class="mb-label">SPIN</span></button>
+        <button id="btn-char-random" class="menu-btn small"><span class="mb-label">RANDOMISE</span></button>
+        <button id="btn-char-reset" class="menu-btn small"><span class="mb-label">RESET</span></button>
+        <button id="btn-char-done" class="menu-btn small primary"><span class="mb-label">DONE</span></button>
+      </div>
     </div>
   </div>
 

@@ -84,7 +84,10 @@ const { Vehicle } = await import('../src/physics/vehicle.js');
 const { CarVisual } = await import('../src/world/carMesh.js');
 const { Progression } = await import('../src/game/progression.js');
 const { densifyPath, AIDriver, pathProgress } = await import('../src/game/aiDriver.js');
-const { EVENTS, blockCenters, districtOf, buildRoadNetwork, GRID, canyonRoad, POIS } = await import('../src/world/layout.js');
+const { EVENTS, blockCenters, districtOf, buildRoadNetwork, GRID, canyonRoad, POIS,
+  RAMPS, BRIDGES, surfaceHeightAt } = await import('../src/world/layout.js');
+const { defaultLook, normalizeLook, resolvedLook, BUILD_SCALE, LOOK_OPTIONS, OUTFITS } = await import('../src/data/look.js');
+const { Player } = await import('../src/game/player.js');
 const { Settings } = await import('../src/core/settings.js');
 const { formatMoney, formatTime, ordinal, SpatialGrid, circleBox, wrapAngle } = await import('../src/core/util.js');
 
@@ -515,10 +518,214 @@ section('AI cornering');
 }
 
 // ------------------------------------------------------------
+section('map: ramps, jumps and the overpass');
+{
+  ok(RAMPS.length >= 1, `the map has a launch ramp (${RAMPS.length})`);
+  ok(BRIDGES.length >= 1, `the map has a bridge (${BRIDGES.length})`);
+  // the surface query must describe the actual ramp: 0 at the foot, then it climbs
+  for (const r of RAMPS) {
+    const foot = surfaceHeightAt(r.x, r.z, 0);
+    const mid = surfaceHeightAt(r.x + r.dx * r.length * 0.5, r.z + r.dz * r.length * 0.5, r.height * 0.5);
+    const lip = surfaceHeightAt(r.x + r.dx * r.length * 0.99, r.z + r.dz * r.length * 0.99, r.height);
+    ok(Math.abs(foot) < 0.05, `ramp ${r.id} starts at street level`);
+    ok(mid > 0.5 && mid < r.height, `ramp ${r.id} climbs (${mid.toFixed(2)} m at half way)`);
+    ok(lip > r.height * 0.9, `ramp ${r.id} reaches its lip height (${lip.toFixed(2)} m)`);
+    // just past the lip there is nothing to land on: that is the jump
+    const past = surfaceHeightAt(r.x + r.dx * (r.length + 6), r.z + r.dz * (r.length + 6), r.height);
+    ok(past < 0.05, `ramp ${r.id} ends in a drop (lip at ${r.height} m)`);
+    ok(pointInCollider(r.x + r.dx * r.length * 0.5, r.z + r.dz * r.length * 0.5, 0.2) === null,
+      `ramp ${r.id} deck is drivable`);
+  }
+  for (const b of BRIDGES) {
+    const mid = surfaceHeightAt(b.x + b.dx * b.length / 2, b.z + b.dz * b.length / 2, b.deckY);
+    ok(Math.abs(mid - b.deckY) < 0.01, `bridge ${b.id} holds its deck height (${mid.toFixed(2)} m)`);
+    // the street below must still be driveable at ground level
+    const under = surfaceHeightAt(b.x + b.dx * b.length / 2, b.z + b.dz * b.length / 2, 0);
+    ok(under === 0, `bridge ${b.id} leaves the street below open (${under})`);
+    ok(pointInCollider(b.x + b.dx * b.length / 2, b.z + b.dz * b.length / 2, 0.4) === null,
+      `bridge ${b.id} centre is clear of the street`);
+  }
+  // flat ground everywhere else
+  ok(surfaceHeightAt(0, 0, 0) === 0 && surfaceHeightAt(-300, 180, 0) === 0, 'ordinary streets are flat');
+}
+
+section('driving over a ramp: launch, flight and landing');
+{
+  const def = CAR_BY_ID['coupe_bavar'];
+  const world = {
+    surfaceGrip: () => 1,
+    surfaceHeightAt: (x, z, fromY) => surfaceHeightAt(x, z, fromY),
+  };
+  const r = RAMPS[0];
+  // line the car up on the approach and hold full throttle
+  const startX = r.x - r.dx * 60, startZ = r.z - r.dz * 60;
+  const heading = Math.atan2(-r.dz, r.dx);   // forward = (cos h, -sin h)
+  const v = new Vehicle(def, defaultMods(def), { transmission: 'auto', assists: true });
+  v.reset(startX, startZ, heading);
+  let maxY = 0, airFrames = 0, landing = 0, maxVy = 0;
+  for (let i = 0; i < 120 * 14; i++) {
+    v.update(1 / 120, { throttle: 1, brake: 0, steer: 0, handbrake: 0 }, world);
+    maxY = Math.max(maxY, v.y);
+    maxVy = Math.max(maxVy, v.vy);
+    if (v.airborne) airFrames++;
+    if (v.events.landing > 0) { landing = Math.max(landing, v.events.landing); v.events.landing = 0; }
+  }
+  ok(maxY > r.height * 0.9, `the car climbs the ramp (${maxY.toFixed(2)} m)`);
+  ok(maxVy > 1.5, `the lip launches the car upwards (${maxVy.toFixed(2)} m/s)`);
+  ok(airFrames > 20, `the car spends real time in the air (${(airFrames / 120).toFixed(2)} s)`);
+  ok(landing > 1, `the landing is detected (${landing.toFixed(1)} m/s impact)`);
+  ok(v.y === 0 && !v.airborne, 'the car comes back down to the street');
+  ok(isFinite(v.x) && isFinite(v.z) && isFinite(v.y), 'the jump never produces NaN');
+  ok(v.speed > 5, `the car keeps rolling after the landing (${v.speedKmh.toFixed(0)} km/h)`);
+
+  // a car rolling up the bridge must crest it and come down the far side
+  const b = BRIDGES[0];
+  const v2 = new Vehicle(def, defaultMods(def), { transmission: 'auto', assists: true });
+  v2.reset(b.x - b.dx * 70, b.z - b.dz * 70, Math.atan2(-b.dz, b.dx));
+  let top = 0;
+  for (let i = 0; i < 120 * 20; i++) {
+    v2.update(1 / 120, { throttle: 1, brake: 0, steer: 0, handbrake: 0 }, world);
+    top = Math.max(top, v2.y);
+  }
+  ok(top > b.deckY * 0.95, `the car drives over the bridge deck (${top.toFixed(2)} m)`);
+  ok(v2.y < 0.1, `and back down to street level (${v2.y.toFixed(2)} m)`);
+
+  // airborne cars have no grip: steering must not turn them mid-flight
+  const v3 = new Vehicle(def, defaultMods(def), { transmission: 'auto', assists: true });
+  v3.reset(b.x, b.z + b.length * 0.5, Math.atan2(-b.dz, b.dx));
+  v3.airborne = true; v3.y = 6; v3.vy = 0; v3.vx = 20; v3.vz = 0; v3.heading = 0;
+  const h0 = v3.heading;
+  for (let i = 0; i < 30; i++) v3.update(1 / 120, { throttle: 1, brake: 0, steer: 1, handbrake: 0 }, world);
+  ok(Math.abs(v3.heading - h0) < 0.05, 'the wheel does nothing in mid-air');
+}
+
+// ------------------------------------------------------------
+section('the starter car is the blue BMW-style coupé');
+{
+  const { STARTER_CAR_ID } = await import('../src/game/progression.js');
+  ok(STARTER_CAR_ID === 'coupe_bavar', 'the starter car id is the new coupé');
+  const def = CAR_BY_ID[STARTER_CAR_ID];
+  ok(!!def, 'the starter car exists in the catalogue');
+  ok(def.drivetrain === 'RWD' && def.engine === 'i6', 'it is a rear-drive straight six');
+  ok(def.body.grille === 'kidney', 'it has the twin-kidney grille');
+  ok(!!def.body.gills, 'it has the M-style side gills');
+  ok(def.body.archFlare > 0.02, 'it has the flared arches');
+  ok(def.defaultColor.toLowerCase() === '#1846a8', `it is Estoril blue (${def.defaultColor})`);
+  const st = computeStats(def, defaultMods(def));
+  ok(st.hp > 300 && st.hp < 380, `343-ish horsepower (${st.hp})`);
+  ok(st.topSpeed >= 240 && st.topSpeed < 270, `250-ish top speed (${st.topSpeed})`);
+  ok(st.accel < 6.5, `it is quick off the line (${st.accel.toFixed(1)} s to 100)`);
+  // and the game really starts in it, with real money in the bank
+  const prog3 = new Progression();
+  prog3.newGame('STARTER');
+  ok(prog3.cars.length === 1 && prog3.cars[0].defId === 'coupe_bavar', 'a new game starts in the coupé');
+  ok(prog3.money >= 20000, `a new game starts with real money ($${prog3.money})`);
+  const { CONFIG: CFG } = await import('../src/config.js');
+  ok(CFG.economy.startMoney === prog3.money, 'the starting cash comes from the config');
+}
+
+// ------------------------------------------------------------
+section('driver customisation');
+{
+  const look = defaultLook();
+  ok(look.skin && look.jacket && look.pants && look.shoe, 'there is a default look');
+  for (const k of ['skin', 'hair', 'jacket', 'accent', 'pants', 'shoe']) {
+    ok(Array.isArray(LOOK_OPTIONS[k]) && LOOK_OPTIONS[k].length >= 4, `${k} has a palette (${LOOK_OPTIONS[k].length})`);
+    ok(LOOK_OPTIONS[k].every((c) => /^#[0-9a-f]{6}$/i.test(c)), `${k} palette entries are hex colours`);
+  }
+  ok(LOOK_OPTIONS.hairStyle.length >= 4, 'there are hair styles to pick from');
+  ok(BUILD_SCALE.length >= 3 && OUTFITS.length >= 3, 'there are builds and outfits');
+  // junk is rejected, valid patches survive
+  const n = normalizeLook({ skin: 'red', jacket: '#ff0000', build: 99, hairStyle: -3 });
+  ok(n.jacket === '#ff0000', 'a valid colour is kept');
+  ok(n.skin === look.skin, 'an invalid colour falls back to the default');
+  ok(n.build === BUILD_SCALE.length - 1 && n.hairStyle === 0, 'out-of-range indexes are clamped');
+  ok(normalizeLook(null).skin === look.skin, 'a missing look falls back to the default');
+  // an outfit can override the jacket and trousers
+  const suit = resolvedLook({ ...look, outfit: OUTFITS.findIndex((o) => o.id === 'suit') });
+  ok(suit.jacket === '#14171c', 'the suit overrides the jacket colour');
+  ok(suit.build && suit.build.shoulder > 0, 'the resolved look carries the build scale');
+
+  // progression stores it and saves it
+  const prog4 = new Progression();
+  prog4.newGame('DRIVER');
+  ok(prog4.look.skin === look.skin, 'a new game has the default look');
+  prog4.setLook({ jacket: '#c8202c', build: 2, hairStyle: 3 });
+  ok(prog4.look.jacket === '#c8202c' && prog4.look.build === 2, 'the look can be changed');
+  prog4.save();
+  const prog5 = new Progression();
+  prog5.load();
+  ok(prog5.look.jacket === '#c8202c' && prog5.look.hairStyle === 3, 'the look survives a save/load round trip');
+  // an old save with no look at all must still load
+  const raw = JSON.parse(JSON.stringify(prog4.data));
+  delete raw.look;
+  global.window.localStorage.setItem('street_empire_save_v1', JSON.stringify(raw));
+  const prog6 = new Progression();
+  ok(prog6.load() != null && prog6.look.skin === look.skin, 'an old save gets a default look on load');
+
+  // the rig can be rebuilt into any look without leaking or breaking
+  const rigScene = new THREE.Scene();
+  const rig = new Player(rigScene, defaultLook());
+  const meshes0 = (() => { let n = 0; rig.group.traverse((o) => { if (o.isMesh) n++; }); return n; })();
+  ok(meshes0 > 10, `the driver rig is built (${meshes0} meshes)`);
+  for (let i = 0; i < LOOK_OPTIONS.hairStyle.length; i++) {
+    rig.setLook({ ...defaultLook(), hairStyle: i, build: i % BUILD_SCALE.length });
+    let count = 0, nan = false;
+    rig.group.updateMatrixWorld(true);
+    rig.group.traverse((o) => {
+      if (!o.isMesh) return;
+      count++;
+      const bb = new THREE.Box3().setFromObject(o);
+      if (![bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.max.y, bb.max.z].every(isFinite)) nan = true;
+      if (Math.abs(bb.min.z) > 2.5 || Math.abs(bb.max.z) > 2.5) nan = true;
+    });
+    ok(count > 10 && !nan, `hair style ${i} rebuilds cleanly (${count} meshes)`);
+  }
+  // shoulders must widen with the build
+  const narrow = new Player(rigScene, { ...defaultLook(), build: 0 });
+  const wide = new Player(rigScene, { ...defaultLook(), build: BUILD_SCALE.length - 1 });
+  ok(wide.armR.position.x > narrow.armR.position.x, 'a heavier build has wider shoulders');
+  ok(wide.materials[1].color.getHex() === narrow.materials[1].color.getHex(), 'the jacket colour is independent of the build');
+}
+
+// ------------------------------------------------------------
+section('more races on the map');
+{
+  ok(EVENTS.length >= 12, `the city has a full calendar of races (${EVENTS.length})`);
+  ok(new Set(EVENTS.map((e) => e.id)).size === EVENTS.length, 'race ids are unique');
+  ok(new Set(EVENTS.map((e) => e.name)).size === EVENTS.length, 'race names are unique');
+  for (const ev of EVENTS) {
+    ok(typeof ev.fee === 'number' && ev.fee >= 0, `${ev.id} has a sane entry fee`);
+    ok(ev.prize > ev.fee, `${ev.id} pays more than it costs`);
+    ok(ev.route.length >= 3, `${ev.id} has a real route (${ev.route.length} points)`);
+    ok(ev.desc && ev.desc.length > 30, `${ev.id} has a description`);
+  }
+  for (const id of ['sprint_stunt', 'circuit_autos', 'sprint_palms', 'drift_hangar', 'delivery_2']) {
+    ok(EVENTS.some((e) => e.id === id), `new event ${id} exists`);
+  }
+  const stunt = EVENTS.find((e) => e.id === 'sprint_stunt');
+  const ramp = RAMPS[0];
+  const nearRamp = Math.min(...[[stunt.x, stunt.z], ...stunt.route].map(([x, z]) => Math.hypot(x - ramp.x, z - ramp.z)));
+  ok(nearRamp < 25, `the stunt race lines up with the kicker (${nearRamp.toFixed(1)} m)`);
+  // start lines must be far enough apart that the prompt picks one
+  for (let i = 0; i < EVENTS.length; i++) {
+    for (let j = i + 1; j < EVENTS.length; j++) {
+      const a = EVENTS[i], b = EVENTS[j];
+      const d = Math.hypot(a.x - b.x, a.z - b.z);
+      ok(d > 15, `start lines ${a.id} / ${b.id} do not overlap (${d.toFixed(0)} m)`);
+    }
+  }
+  const prog7 = new Progression();
+  prog7.newGame('CALENDAR');
+  ok(prog7.data.unlockedEvents.length >= 8, `a new game unlocks a starter calendar (${prog7.data.unlockedEvents.length})`);
+  for (const id of prog7.data.unlockedEvents) ok(EVENTS.some((e) => e.id === id), `unlocked event ${id} exists`);
+}
+
+// ------------------------------------------------------------
 section('progression & saves');
 const prog = new Progression();
 prog.newGame('TESTER');
-eq(prog.money, 2500, 'new game starts with the configured cash');
+eq(prog.money, 40000, 'new game starts with the configured cash');
 ok(prog.cars.length === 1, 'new game starts with one car');
 ok(prog.activeCar() != null, 'new game has an active car');
 ok(prog.collectionValue() > 0, 'collection has a value', 'value=' + prog.collectionValue() + ' cars=' + JSON.stringify(prog.cars.map(c=>c.defId)));

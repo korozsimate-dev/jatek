@@ -2,19 +2,17 @@
 // Player character on foot — articulated low-poly figure with walk,
 // run, idle and enter/exit animation. Moves with simple kinematic
 // collision against the city's static colliders.
+//
+// The figure is built from a `look` descriptor (skin / hair / clothes /
+// build / hair style), so the driver customiser can rebuild it live.
 // ============================================================
 import * as THREE from 'three';
 import { CONFIG } from '../config.js';
 import { clamp, circleBox } from '../core/util.js';
-
-const SKIN = '#c99b74';
-const JACKET = '#1d2833';
-const JACKET_ACCENT = '#25e0d0';
-const PANTS = '#262b32';
-const SHOE = '#121417';
+import { defaultLook, resolvedLook } from '../data/look.js';
 
 export class Player {
-  constructor(scene) {
+  constructor(scene, look) {
     this.group = new THREE.Group();
     this.group.name = 'player';
     scene.add(this.group);
@@ -24,19 +22,51 @@ export class Player {
     this.heading = 0;
     this.speed = 0;
     this.inCar = null;
-    this.anim = { phase: 0, run: 0, lean: 0, armSwing: 0 };
+    this.anim = { phase: 0, run: 0, lean: 0, armSwing: 0, turn: 0 };
     this.radius = CONFIG.player.radius;
     this.materials = [];
+    this.look = look || defaultLook();
     this.build();
   }
 
+  // Rebuild the figure in place (used by the character customiser).
+  setLook(look, opts = {}) {
+    this.look = look || this.look;
+    const keepHeading = this.heading;
+    const keepPos = this.group.position.clone();
+    this.disposeRig();
+    this.build();
+    this.group.position.copy(keepPos);
+    this.group.rotation.y = keepHeading;
+    if (opts.hideColors) for (const m of this.materials) m.color.set('#202428');
+    return this;
+  }
+
+  disposeRig() {
+    this.rig.traverse((o) => { if (o.isMesh) o.geometry.dispose(); });
+    this.materials.forEach((m) => m.dispose());
+    this.materials = [];
+    this.rig.clear();
+  }
+
   build() {
-    const skinMat = new THREE.MeshStandardMaterial({ color: SKIN, roughness: 0.72 });
-    const jacketMat = new THREE.MeshStandardMaterial({ color: JACKET, roughness: 0.60, metalness: 0.10 });
-    const pantsMat = new THREE.MeshStandardMaterial({ color: PANTS, roughness: 0.88 });
-    const shoeMat = new THREE.MeshStandardMaterial({ color: SHOE, roughness: 0.65 });
-    const accentMat = new THREE.MeshStandardMaterial({ color: JACKET_ACCENT, emissive: new THREE.Color('#25e0d0'), emissiveIntensity: 0.35, roughness: 0.5 });
-    this.materials = [skinMat, jacketMat, pantsMat, shoeMat, accentMat];
+    const L = resolvedLook(this.look);
+    this.resolved = L;
+    const B = L.build;
+    const skinMat = new THREE.MeshStandardMaterial({ color: L.skin, roughness: 0.72 });
+    const jacketMat = new THREE.MeshStandardMaterial({ color: L.jacket, roughness: 0.60, metalness: 0.10 });
+    const pantsMat = new THREE.MeshStandardMaterial({ color: L.pants, roughness: 0.88 });
+    const shoeMat = new THREE.MeshStandardMaterial({ color: L.shoe, roughness: 0.65 });
+    const accentMat = new THREE.MeshStandardMaterial({
+      color: L.accent, emissive: new THREE.Color(L.accent), emissiveIntensity: 0.35, roughness: 0.5,
+    });
+    const hairMat = new THREE.MeshStandardMaterial({ color: L.hair, roughness: 0.85 });
+    const darkMat = new THREE.MeshStandardMaterial({ color: '#121417', roughness: 0.6, metalness: 0.2 });
+    // pass 1 builds the geometry; colours are applied afterwards so both the
+    // live rig and the customiser preview use exactly the same code path
+    const paintAll = !!this._paintAfter;
+    const unlit = (m) => { if (paintAll) m.color.set('#2a2f35'); return m; };
+    this.materials = [skinMat, jacketMat, pantsMat, shoeMat, accentMat, hairMat, darkMat].map(unlit);
 
     const mkBox = (w, h, d, mat, x, y, z) => {
       const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
@@ -47,32 +77,64 @@ export class Player {
 
     // hips
     const hips = new THREE.Group(); hips.position.y = 0.92;
-    hips.add(mkBox(0.34, 0.20, 0.24, pantsMat, 0, 0, 0));
+    hips.add(mkBox(0.34 * B.hip, 0.20, 0.24 * B.hip, pantsMat, 0, 0, 0));
     // torso
     const torso = new THREE.Group(); torso.position.y = 0.10;
-    torso.add(mkBox(0.44, 0.56, 0.26, jacketMat, 0, 0.28, 0));
+    torso.add(mkBox(0.44 * B.chest, 0.56, 0.26 * B.chest, jacketMat, 0, 0.28, 0));
     // chest accent stripe
-    torso.add(mkBox(0.46, 0.06, 0.27, accentMat, 0, 0.42, 0));
-    // collar
-    torso.add(mkBox(0.30, 0.08, 0.22, jacketMat, 0, 0.57, 0));
+    torso.add(mkBox(0.46 * B.chest, 0.06, 0.27 * B.chest, accentMat, 0, 0.42, 0));
+    // collar / open jacket front
+    if (L.outfitDef.collar) {
+      torso.add(mkBox(0.30 * B.chest, 0.08, 0.22 * B.chest, jacketMat, 0, 0.57, 0));
+      // shirt showing in the V of the jacket
+      if (L.outfitDef.shirt) torso.add(mkBox(0.12, 0.34, 0.02, new THREE.MeshStandardMaterial({ color: L.outfitDef.shirt, roughness: 0.7 }), 0, 0.38, 0.135 * B.chest));
+      // zip
+      torso.add(mkBox(0.02, 0.34, 0.02, accentMat, 0, 0.30, 0.132 * B.chest));
+    } else if (L.outfitDef.hood) {
+      // hood bunched behind the neck
+      torso.add(mkBox(0.30 * B.chest, 0.14, 0.18, jacketMat, 0, 0.56, -0.10 * B.chest));
+    } else {
+      torso.add(mkBox(0.16 * B.chest, 0.07, 0.20 * B.chest, jacketMat, 0, 0.56, 0));
+    }
     hips.add(torso);
+
     // head
     const head = new THREE.Group(); head.position.y = 0.62;
     head.add(mkBox(0.24, 0.26, 0.24, skinMat, 0, 0.12, 0));
-    // hair
-    head.add(mkBox(0.26, 0.10, 0.26, jacketMat, 0, 0.25, 0));
+    // ears
+    for (const sgn of [1, -1]) head.add(mkBox(0.03, 0.07, 0.05, skinMat, sgn * 0.125, 0.12, 0));
+    // hair: style-dependent
+    const style = L.hairStyle;
+    if (style === 1) {                        // buzz cut: thin skull cap
+      head.add(mkBox(0.25, 0.05, 0.25, hairMat, 0, 0.255, 0));
+    } else if (style === 2) {                 // top knot
+      head.add(mkBox(0.26, 0.08, 0.26, hairMat, 0, 0.25, -0.01));
+      head.add(mkBox(0.10, 0.10, 0.10, hairMat, 0, 0.34, -0.06));
+    } else if (style === 3) {                 // mohawk
+      head.add(mkBox(0.07, 0.16, 0.26, hairMat, 0, 0.30, 0));
+    } else if (style === 4) {                 // long
+      head.add(mkBox(0.27, 0.10, 0.27, hairMat, 0, 0.25, -0.01));
+      head.add(mkBox(0.26, 0.30, 0.08, hairMat, 0, 0.10, -0.135));
+    } else if (style === 5) {                 // bald: nothing
+      head.add(mkBox(0.02, 0.02, 0.02, skinMat, 0, 0.26, 0));
+    } else {                                  // faded crop (default)
+      head.add(mkBox(0.26, 0.10, 0.26, hairMat, 0, 0.25, -0.005));
+    }
     // sunglasses
-    head.add(mkBox(0.25, 0.05, 0.03, shoeMat, 0, 0.14, 0.12));
+    head.add(mkBox(0.25, 0.05, 0.03, darkMat, 0, 0.14, 0.12));
     torso.add(head);
+
     // arms
     const mkArm = (sgn) => {
       const pivot = new THREE.Group();
-      pivot.position.set(sgn * 0.27, 0.50, 0);
-      const upper = mkBox(0.13, 0.30, 0.14, jacketMat, 0, -0.15, 0);
+      pivot.position.set(sgn * 0.27 * B.shoulder, 0.50, 0);
+      const upper = mkBox(0.13 * B.limb, 0.30, 0.14 * B.limb, jacketMat, 0, -0.15, 0);
       pivot.add(upper);
-      const lower = mkBox(0.12, 0.28, 0.13, jacketMat, 0, -0.42, 0);
+      const lower = mkBox(0.12 * B.limb, 0.28, 0.13 * B.limb, jacketMat, 0, -0.42, 0);
       pivot.add(lower);
-      const hand = mkBox(0.11, 0.10, 0.12, skinMat, 0, -0.60, 0);
+      // cuff accent
+      pivot.add(mkBox(0.13 * B.limb, 0.03, 0.14 * B.limb, accentMat, 0, -0.545, 0));
+      const hand = mkBox(0.11 * B.limb, 0.10, 0.12 * B.limb, skinMat, 0, -0.60, 0);
       pivot.add(hand);
       return pivot;
     };
@@ -83,13 +145,13 @@ export class Player {
     // legs
     const mkLeg = (sgn) => {
       const pivot = new THREE.Group();
-      pivot.position.set(sgn * 0.11, 0, 0);
-      const thigh = mkBox(0.16, 0.44, 0.18, pantsMat, 0, -0.22, 0);
+      pivot.position.set(sgn * 0.11 * B.hip, 0, 0);
+      const thigh = mkBox(0.16 * B.limb, 0.44, 0.18 * B.limb, pantsMat, 0, -0.22, 0);
       pivot.add(thigh);
       const shin = new THREE.Group(); shin.position.y = -0.44;
-      shin.add(mkBox(0.145, 0.42, 0.16, pantsMat, 0, -0.21, 0));
+      shin.add(mkBox(0.145 * B.limb, 0.42, 0.16 * B.limb, pantsMat, 0, -0.21, 0));
       // toes point along +Z: the direction the rig walks in
-      const foot = mkBox(0.16, 0.11, 0.30, shoeMat, 0, -0.46, 0.07);
+      const foot = mkBox(0.16 * B.limb, 0.11, 0.30, shoeMat, 0, -0.46, 0.07);
       shin.add(foot);
       pivot.add(shin);
       return { pivot, shin };
@@ -102,6 +164,15 @@ export class Player {
     this.torso = torso;
     this.headGroup = head;
     this.rig.add(hips);
+
+    // keep the rig's feet on the ground whatever the build
+    this.rig.position.y = 0;
+    if (paintAll) {
+      skinMat.color.set(L.skin); jacketMat.color.set(L.jacket);
+      pantsMat.color.set(L.pants); shoeMat.color.set(L.shoe);
+      accentMat.color.set(L.accent); accentMat.emissive.set(L.accent);
+      hairMat.color.set(L.hair);
+    }
   }
 
   // The rig is modelled facing +Z (shoulders span X), so with rotation.y = h
@@ -163,7 +234,7 @@ export class Player {
     const r = this.radius;
     const near = colliders ? colliders.query(this.x, this.z, r + 1.2) : [];
     for (const c of near) {
-      if (c.height < 0.5) continue;
+      if (c.height < 0.5 || (c.baseY || 0) > 1.2) continue;
       const hit = circleBox(this.x, this.z, r, c);
       if (hit) { this.x += hit.nx * hit.depth; this.z += hit.nz * hit.depth; }
     }

@@ -370,7 +370,7 @@ export class Hud {
       const unlocked = prog.isUnlocked(ev);
       mark(ev.x, ev.z, unlocked ? '#ffc247' : '#4a525c', small ? 5 : 7, true);
     }
-    const poiColors = { garage: '#25e0d0', tune: '#ffc247', dealer: '#a56bff', meet: '#ff7ad9', gas: '#7f8c98', drift: '#ff9a3c' };
+    const poiColors = { garage: '#25e0d0', tune: '#ffc247', dealer: '#a56bff', meet: '#ff7ad9', gas: '#7f8c98', drift: '#ff9a3c', driver: '#8ef7a0' };
     for (const k of Object.keys(POIS)) {
       const p = POIS[k];
       mark(p.x, p.z, poiColors[p.type] || '#8899aa', small ? 4 : 6, true);
@@ -415,7 +415,7 @@ export class Hud {
       ctx.textAlign = 'left';
       ctx.fillText(ev.name, tx(ev.x) + 11, tx(ev.z) + 3);
     }
-    const poiColors = { garage: '#25e0d0', tune: '#ffc247', dealer: '#a56bff', meet: '#ff7ad9', gas: '#7f8c98', drift: '#ff9a3c' };
+    const poiColors = { garage: '#25e0d0', tune: '#ffc247', dealer: '#a56bff', meet: '#ff7ad9', gas: '#7f8c98', drift: '#ff9a3c', driver: '#8ef7a0' };
     for (const k of Object.keys(POIS)) {
       const p = POIS[k];
       ctx.beginPath();

@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { CONFIG } from '../config.js';
 import { RNG, SpatialGrid, clamp } from '../core/util.js';
 const clamp01 = (v) => clamp(v, 0, 1);
-import { GRID, ROAD_HW, PAD, PAD_H, RING, RING_HW, BOUND, CANYON_GATE, blockCenters, districtOf, POIS, LOTS, GAS_STATIONS, canyonRoad } from './layout.js';
+import { GRID, ROAD_HW, PAD, PAD_H, RING, RING_HW, BOUND, CANYON_GATE, blockCenters, districtOf, POIS, LOTS, GAS_STATIONS, canyonRoad, RAMPS, BRIDGES, surfaceHeightAt, onStuntSurface } from './layout.js';
 const BOUND_X = 560;
 const BOUND_Z = 540;
 import { GeoBatch, MATS, initMaterials, buildTower, buildShop, buildHouse, buildWarehouse, buildContainer,
@@ -35,11 +35,11 @@ export class City {
     this._id = 0;
   }
 
-  collider(minX, maxX, minZ, maxZ, height = 24, kind = 'building') {
+  collider(minX, maxX, minZ, maxZ, height = 24, kind = 'building', baseY = 0) {
     const fit = this._fitCollider(minX, maxX, minZ, maxZ, kind);
     if (!fit) return;
     minX = fit.minX; maxX = fit.maxX; minZ = fit.minZ; maxZ = fit.maxZ; kind = fit.kind;
-    const c = { id: this._id++, minX, maxX, minZ, maxZ, height, kind, disabled: false };
+    const c = { id: this._id++, minX, maxX, minZ, maxZ, height, kind, baseY, disabled: false };
     this.colliderList.push(c);
     this.colliders.insert(c);
     return c;
@@ -124,6 +124,7 @@ export class City {
     this._canyon();
     this._mountains();
     this._props();
+    this._stunts();
     this._floodLights();
     this._buildLampHalos();
     this._mapDebug();
@@ -750,8 +751,9 @@ export class City {
       for (const sgn of [1, -1]) {
         const ox = Math.cos(rot) * 0 + Math.sin(rot) * sgn * 7.5;
         const oz = Math.cos(rot) * sgn * 7.5;
+        // The gantry legs are scenery only. A start line must never be a wall:
+        // a race that loops back over its own start would be blocked by it.
         b.cyl('darkMetal', 0.22, 0.3, 7.5, ev.x + ox, 0.02, ev.z + oz, 8);
-        this.collider(ev.x + ox - 0.4, ev.x + ox + 0.4, ev.z + oz - 0.4, ev.z + oz + 0.4, 7.5, 'prop');
       }
       const banner = new THREE.BoxGeometry(0.2, 1.4, 15.5);
       banner.rotateY(rot);
@@ -957,6 +959,149 @@ export class City {
       if (Math.abs(x - bl.cx) < h && Math.abs(z - bl.cz) < h) return true;
     }
     return false;
+  }
+
+  // Height of the drivable surface (0 = street level). Ramps and the bridge
+  // come from layout.js, so physics and meshes can never disagree.
+  surfaceHeightAt(x, z, fromY) {
+    return surfaceHeightAt(x, z, fromY);
+  }
+
+  // ---------- stunt surfaces: the kicker ramp and the overpass ----------
+  // Deck geometry is generated from the same RAMPS / BRIDGES tables the
+  // physics reads, so the surface you see is exactly the surface you drive.
+  _stunts() {
+    const b = new GeoBatch();
+    const segs = 8;
+    const quad = (list, p0, p1, p2, p3) => {
+      const base = list.pos.length / 3;
+      for (const p of [p0, p1, p2, p3]) list.pos.push(p[0], p[1], p[2]);
+      list.idx.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+    };
+    const strip = (list, cx, cy, cz, dx, dz, hw, y0, y1, len) => {
+      const sx = -dz * hw, sz = dx * hw;
+      for (let i = 0; i < segs; i++) {
+        const t0 = i / segs, t1 = (i + 1) / segs;
+        quad(list,
+          [cx + dx * len * t0 - sx, y0 + (y1 - y0) * t0, cz + dz * len * t0 - sz],
+          [cx + dx * len * t0 + sx, y0 + (y1 - y0) * t0, cz + dz * len * t0 + sz],
+          [cx + dx * len * t1 - sx, y0 + (y1 - y0) * t1, cz + dz * len * t1 - sz],
+          [cx + dx * len * t1 + sx, y0 + (y1 - y0) * t1, cz + dz * len * t1 + sz]);
+      }
+    };
+    const finish = (list, key) => {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(list.pos, 3));
+      const uv = [];
+      for (let i = 0; i < list.pos.length; i += 3) uv.push((list.pos[i] + list.pos[i + 2]) / 10, list.pos[i + 1] / 5);
+      g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      g.setIndex(list.idx);
+      g.computeVertexNormals();
+      b.push(key, g);
+    };
+    const deckList = { pos: [], idx: [] };
+
+    for (const r of RAMPS) {
+      strip(deckList, r.x, 0, r.z, r.dx, r.dz, r.width / 2, 0.04, r.height, r.length);
+      // chevrons up the deck so it reads as a launch ramp
+      const ang = Math.atan2(-r.dz, r.dx);
+      for (let i = 0; i < 4; i++) {
+        const t = (i + 0.55) / 4.4;
+        const g = new THREE.BoxGeometry(1.1, 0.08, r.width * 0.62);
+        g.rotateY(ang);
+        g.rotateZ(Math.atan2(r.height, r.length));
+        g.translate(r.x + r.dx * r.length * t, r.height * t + 0.07, r.z + r.dz * r.length * t);
+        b.push('paintWhite', g);
+      }
+      // side walls: a right triangle per side, extruded thin
+      for (const sgn of [1, -1]) {
+        const shape = new THREE.Shape();
+        shape.moveTo(0, 0);
+        shape.lineTo(r.length, 0);
+        shape.lineTo(r.length, r.height);
+        shape.lineTo(0, 0);
+        const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.28, bevelEnabled: false, curveSegments: 1 });
+        // ExtrudeGeometry is non-indexed; the batch merges indexed primitives, so
+        // give it a trivial index rather than losing the whole batch to a warning
+        if (!geo.index) geo.setIndex([...Array(geo.attributes.position.count).keys()]);
+        geo.rotateY(ang);
+        // shift to the ramp start, then across to the chosen side
+        geo.translate(r.x, 0, r.z);
+        geo.translate(-r.dz * sgn * (r.width / 2), 0, r.dx * sgn * (r.width / 2));
+        b.push('concrete', geo);
+      }
+      // neon lip so the jump is findable at night
+      const lipX = r.x + r.dx * r.length, lipZ = r.z + r.dz * r.length;
+      const neon = new THREE.BoxGeometry(0.42, 0.14, r.width);
+      neon.rotateY(ang);
+      neon.translate(lipX, r.height + 0.05, lipZ);
+      b.push('neon:cyan', neon);
+      this._neonLight(lipX, r.height + 0.3, lipZ, 'cyan', 3.2);
+      // an approach marker painted on the street
+      const ap = new THREE.PlaneGeometry(r.length, r.width * 1.06);
+      ap.rotateX(-Math.PI / 2);
+      ap.rotateY(ang);
+      ap.translate(r.x - r.dx * r.length * 0.62, 0.035, r.z - r.dz * r.length * 0.62);
+      b.push('paintWhite', ap);
+      // the walls are solid, the deck is not
+      for (const sgn of [1, -1]) {
+        const ox = -r.dz * sgn * (r.width / 2 + 0.2), oz = r.dx * sgn * (r.width / 2 + 0.2);
+        const x1 = r.x + ox, z1 = r.z + oz;
+        const x2 = r.x + r.dx * r.length + ox, z2 = r.z + r.dz * r.length + oz;
+        this.collider(Math.min(x1, x2) - 0.15, Math.max(x1, x2) + 0.15, Math.min(z1, z2) - 0.15, Math.max(z1, z2) + 0.15, 1.0, 'prop');
+      }
+    }
+
+    for (const br of BRIDGES) {
+      const ang = Math.atan2(-br.dz, br.dx);
+      const upLen = br.rampLen, downLen = br.length - br.rampLen;
+      // climbing section, flat deck, descending section
+      strip(deckList, br.x, 0, br.z, br.dx, br.dz, br.width / 2, 0.03, br.deckY, upLen);
+      strip(deckList, br.x + br.dx * upLen, 0, br.z + br.dz * upLen, br.dx, br.dz, br.width / 2, br.deckY, br.deckY, br.length - upLen - br.rampLen);
+      strip(deckList, br.x + br.dx * downLen, 0, br.z + br.dz * downLen, br.dx, br.dz, br.width / 2, br.deckY, 0.03, br.rampLen);
+      // the walls either side of the whole span (solid wedge + parapet)
+      for (const sgn of [1, -1]) {
+        const ox = -br.dz * sgn * (br.width / 2 + 0.22), oz = br.dx * sgn * (br.width / 2 + 0.22);
+        const x1 = br.x + ox, z1 = br.z + oz;
+        const x2 = br.x + br.dx * br.length + ox, z2 = br.z + br.dz * br.length + oz;
+        // the parapet only exists up on the deck: give it a base height so a
+        // car on the street below drives straight underneath it
+        this.collider(Math.min(x1, x2) - 0.16, Math.max(x1, x2) + 0.16, Math.min(z1, z2) - 0.16, Math.max(z1, z2) + 0.16, 1.1, 'rail', br.deckY - 0.5);
+        const rail = new THREE.BoxGeometry(br.length, 0.9, 0.26);
+        rail.rotateY(ang);
+        rail.translate((x1 + x2) / 2, br.deckY + 0.45, (z1 + z2) / 2);
+        b.push('paintWhite', rail);
+      }
+      const midX = br.x + br.dx * br.length / 2, midZ = br.z + br.dz * br.length / 2;
+      // underside slab
+      const slab = new THREE.BoxGeometry(br.length - br.rampLen, 0.6, br.width + 0.8);
+      slab.rotateY(ang);
+      slab.translate(midX, br.deckY - 0.32, midZ);
+      b.push('concrete', slab);
+      // piers: only under the flat span and clear of the street below
+      for (const along of [br.rampLen + 2, br.length - br.rampLen - 2]) {
+        const px = br.x + br.dx * along, pz = br.z + br.dz * along;
+        for (const sgn of [1, -1]) {
+          const ox = -br.dz * sgn * (br.width * 0.40), oz = br.dx * sgn * (br.width * 0.40);
+          b.box('concrete', 1.0, br.deckY - 0.6, 1.0, px + ox, 0, pz + oz);
+          this.collider(px + ox - 0.55, px + ox + 0.55, pz + oz - 0.55, pz + oz + 0.55, br.deckY - 0.6, 'prop');
+        }
+      }
+      // amber chevrons on the climb
+      for (let i = 0; i < 3; i++) {
+        const t = 0.08 + i * 0.10;
+        const g = new THREE.BoxGeometry(0.9, 0.07, br.width * 0.5);
+        g.rotateY(ang);
+        g.rotateZ(Math.atan2(br.deckY, br.rampLen));
+        g.translate(br.x + br.dx * br.length * t, br.deckY * (br.length * t / br.rampLen) + 0.08, br.z + br.dz * br.length * t);
+        b.push('neon:amber', g);
+      }
+      this._neonLight(midX, br.deckY + 1.0, midZ, 'amber', 4);
+    }
+
+    if (deckList.idx.length) finish(deckList, 'asphalt');
+    b.build(this.group, { shadowKeys: new Set(['concrete']) });
+    this._absorb(b);
   }
 
   surfaceGrip(x, z) {

@@ -61,7 +61,7 @@ export const CONFIG = {
   },
 
   economy: {
-    startMoney: 2500,
+    startMoney: 40000,
     startRep: 0,
     raceRepeatCooldown: 45, // seconds in-game before a repeat payout decays
   },

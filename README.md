@@ -138,6 +138,12 @@ plus a switchback canyon circuit in the north-west hills. Street lamps, traffic
 lights, palms, wet zones at gas stations, and a full day/night cycle with
 dynamic weather (clear / rain / fog).
 
+**Your ride.** You start in *the Bavar coupe* — a rear-drive straight-six
+two-door with a kidney grille and gill vents ahead of the front wheels — and a
+bankroll of $40,000 to spend on parts, paint or a second car. Every car is built
+from real lofted bodywork: separate fenders, arches, bumpers, glass, mirrors,
+door seams, working headlamps, brake and reverse lights.
+
 **Cars.** 17 hand-tuned fictional vehicles across 7 categories: 90s JDM coupes,
 German sedans, Euro sports cars, American muscle, hatchbacks, drift cars and
 classic tuners. Every car has RWD / FWD / AWD, its own power curve, gearbox
@@ -153,8 +159,22 @@ height, camber, spoilers, body kits, exhaust tips, tint, paint finish, liveries,
 underglow, seats, steering wheel). Live before/after stat comparison, prices,
 and reputation gates on the good stuff.
 
-**Racing.** Eight events: sprint, two circuits, a highway run, a canyon time
-attack, a drift battle, a car-meet show, and an invite-only underground race.
+**Racing.** Thirteen events: three sprints, two circuits, a highway run, two
+time attacks (the canyon switchbacks and a lap over the stunt-yard kicker), a
+drift battle apiece in Iron Yards and the hangar, a car-meet show, two
+deliveries and an invite-only underground race. Start lines never overlap
+and eight of the thirteen are open from the first minute.
+
+**Stunt driving.** Jumps are real physics, not animation. A 26 m kicker in the
+Auto Row stunt yard launches the car ~3.5 m into the air for over a second if
+you hit it flat out, and an 88 m overpass climbs to a 5 m deck and drops back to
+the street — you keep steering (and losing it) while airborne. The surfaces are
+declared once in `src/world/layout.js` and read by the meshes, the physics and
+the tests alike, so what you see is exactly what you drive.
+
+**Your character.** A full customiser at CUTS & CHROME: hair, outfit, body
+build and skin tone, with a live 3D preview you can spin. The look follows you
+on foot and is saved with your progress.
 Countdown, checkpoints, AI opponents, live position, lap counter, timer, prize
 money and rep. Police patrols react to speeding and reckless driving: wanted
 level, pursuit AI, roadblocks, and an escape cooldown.

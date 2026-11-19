@@ -109,7 +109,7 @@ export class CameraRig {
 
     this.currentDistance = damp(this.currentDistance, dist, 6, dt);
 
-    const carPos = this._tmp.set(vehicle.x, 0, vehicle.z);
+    const carPos = this._tmp.set(vehicle.x, vehicle.y || 0, vehicle.z);
     const fwdX = Math.cos(vehicle.heading), fwdZ = -Math.sin(vehicle.heading);
 
     // 2 = HOOD, 3 = FIRST PERSON. Cinematic (4) is a chase camera.
@@ -118,11 +118,11 @@ export class CameraRig {
       const eyeY = mode === 3 ? CONFIG.player.eyeHeight - 0.28 : 1.32;
       const px = carPos.x + fwdX * (mode === 3 ? 0.1 : 1.35);
       const pz = carPos.z + fwdZ * (mode === 3 ? 0.1 : 1.35);
-      const want = new THREE.Vector3(px, eyeY - (vehicle.pitch || 0) * 0.4, pz);
+      const want = new THREE.Vector3(px, carPos.y + eyeY - (vehicle.pitch || 0) * 0.4, pz);
       this.smoothPos.x = damp(this.smoothPos.x, want.x, 24, dt);
       this.smoothPos.y = damp(this.smoothPos.y, want.y, 24, dt);
       this.smoothPos.z = damp(this.smoothPos.z, want.z, 24, dt);
-      this.smoothLook.set(px + fwdX * lookAhead, eyeY + Math.sin(-this.pitch) * 4, pz + fwdZ * lookAhead);
+      this.smoothLook.set(px + fwdX * lookAhead, carPos.y + eyeY + Math.sin(-this.pitch) * 4, pz + fwdZ * lookAhead);
       this.camera.position.copy(this.smoothPos);
       // add a touch of the car body roll
       this.camera.up.set(Math.sin(-(vehicle.roll || 0) * 0.6), 1, 0).normalize();
@@ -137,7 +137,7 @@ export class CameraRig {
       ).normalize().multiplyScalar(this.currentDistance);
       const want = new THREE.Vector3(
         carPos.x + back.x,
-        Math.max(0.55, height * 0.1 + back.y + 1.1),
+        carPos.y + Math.max(0.55, height * 0.1 + back.y + 1.1),
         carPos.z + back.z
       );
       // keep the camera out of buildings
@@ -150,7 +150,7 @@ export class CameraRig {
       const lookTargetZ = carPos.z + fwdZ * lookAhead * 0.4;
       const rate = mode === 4 ? 3.0 : 12;
       this.smoothLook.x = damp(this.smoothLook.x, lookTargetX, rate, dt);
-      this.smoothLook.y = damp(this.smoothLook.y, 1.05, rate, dt);
+      this.smoothLook.y = damp(this.smoothLook.y, carPos.y + 1.05, rate, dt);
       this.smoothLook.z = damp(this.smoothLook.z, lookTargetZ, rate, dt);
       this.camera.position.copy(this.smoothPos);
       this.camera.lookAt(this.smoothLook);

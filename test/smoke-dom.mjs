@@ -196,6 +196,58 @@ if (game) {
   check(game.frameCount > 100, `frames advance in the world (${game.frameCount})`);
   check(isFinite(game.player.x) && isFinite(game.player.z), 'player position finite');
   game.pause(); game.resume();
+
+  // ---- character customisation, through the real screens ----
+  const look0 = { ...game.progression.look };
+  game.screens.showOnly('character');
+  game.screens.open('character', { from: 'garage' });
+  check(game.state === 'character', `the customiser opens (state=${game.state})`);
+  check(!!game.lookPreview, 'a live figure is shown for the customiser');
+  let previewMeshes = 0;
+  game.lookPreview.group.traverse((o) => { if (o.isMesh) previewMeshes++; });
+  check(previewMeshes > 10, `the preview figure has geometry (${previewMeshes} meshes)`);
+  for (const tab of ['body', 'hair', 'outfit', 'build']) {
+    game.screens.selectCharTab(tab);
+    check(game.screens.charTab === tab, `customiser tab ${tab} renders`);
+  }
+  game.screens.applyLook({ jacket: '#c8202c', hairStyle: 2, build: 0, outfit: 2 });
+  check(game.progression.look.jacket === '#c8202c', 'picking a colour changes the saved look');
+  check(game.progression.look.hairStyle === 2, 'picking a hair style changes the saved look');
+  check(game.player.resolved.hairStyle === 2, 'the walking player is rebuilt with the new look');
+  for (let i = 0; i < 30; i++) game.frame(1 / 60);
+  check(game.state === 'character', 'the customiser keeps rendering frames');
+  game.spinLookPreview();
+  for (let i = 0; i < 10; i++) game.frame(1 / 60);
+  game.screens.closeCharacter();
+  check(!game.lookPreview, 'leaving the customiser removes the preview figure');
+  check(game.progression.look.jacket === '#c8202c', 'the look survives leaving the screen');
+  check(look0.jacket !== '#c8202c', 'and it was actually changed');
+
+  // ---- a real jump, through the game loop ----
+  game.state = 'explore';
+  game.worldActive = true;
+  const v = game.playerVehicle;
+  const { RAMPS } = await import('../src/world/layout.js');
+  const r = RAMPS[0];
+  v.reset(r.x - r.dx * 55, r.z - r.dz * 55, Math.atan2(-r.dz, r.dx));
+  v.visual.group.visible = true;
+  game.playerInCar = true;
+  // hold the throttle: the harness has no real keyboard
+  const realInput = game.readDrivingInput.bind(game);
+  game.readDrivingInput = () => ({ throttle: 1, brake: 0, steer: 0, handbrake: 0, nitro: false });
+  let jumpY = 0, air = 0;
+  for (let i = 0; i < 60 * 14; i++) {
+    game.frame(1 / 60);
+    jumpY = Math.max(jumpY, v.y || 0);
+    if (v.airborne) air++;
+  }
+  check(jumpY > 2, `the car leaves the ground off the ramp (${jumpY.toFixed(1)} m)`);
+  check(air > 10, `and stays airborne for a moment (${(air / 60).toFixed(2)} s)`);
+  check(isFinite(v.x) && isFinite(v.y) && isFinite(v.z), 'the jump leaves the car in a sane state');
+  check(v.visual.group.position.y >= 0.15, 'the car visual follows the height');
+  game.readDrivingInput = realInput;
+  game.playerInCar = false;
+
   game.showMenu();
   check(game.state === 'menu', 'can return to the menu');
 }

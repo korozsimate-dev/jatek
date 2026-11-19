@@ -67,6 +67,9 @@ export class Game {
     this.vehicles = [];
     this.parkedCars = [];
     this.previewCar = null;
+    this.lookPreview = null;
+    this.lookPreviewAngle = 0;
+    this.lookPreviewSpin = 0;
     this.previewMode = null;
     this.previewSpin = 0;
     this.previewZoom = 1;
@@ -110,7 +113,7 @@ export class Game {
       }
     }
     await step(58, 'POLISHING CHROME...');
-    this.player = new Player(this.scene);
+    this.player = new Player(this.scene, this.progression.data ? this.progression.look : undefined);
     this.player.place(-300, 190, Player.fromVehicleHeading(Math.PI));
     this.cameraRig = new CameraRig(this.camera, this.input, this.settings);
     this.cameraRig.colliderQuery = (x, z, r) => {
@@ -343,6 +346,7 @@ export class Game {
     await this.wait(450);
     this.progression.newGame('DRIVER');
     this.progression.save();
+    this.refreshPlayerLook();
     this.fadeToBlack(false);
     this.enterWorldWithActiveCar(true);
     this.hud.centerMessage('SAN VELOR', 'WELCOME TO THE UNDERGROUND', 3200);
@@ -381,6 +385,7 @@ export class Game {
     // stand beside the driver's door, facing the same way as the car
     this.player.place(sp.x + Math.sin(sp.heading) * 2.3, sp.z + Math.cos(sp.heading) * 2.3,
       Player.fromVehicleHeading(sp.heading));
+    this.refreshPlayerLook();
     this.setupPlayerVehicle(def, car.mods, car.uid, sp.x, sp.z, sp.heading);
     const startInCar = !!(savedPos && savedPos.inCar);
     this.playerInCar = false;
@@ -661,7 +666,7 @@ export class Game {
       }
     }
 
-    const active = this.state === 'menu' || this.worldActive;
+    const active = this.state === 'menu' || this.state === 'character' || this.worldActive;
     if (!this.paused && active) this.update(dt, raw);
     else if (this.paused && this.state !== 'menu') {
       // keep the world breathing slightly while paused for atmosphere
@@ -707,6 +712,72 @@ export class Game {
     }
   }
 
+  // ---------- driver customiser preview ----------
+  // A lit figure on a plinth in front of the camera, rebuilt live whenever the
+  // look changes. It replaces the car preview while the customiser is open.
+  enterLookPreview() {
+    this.exitLookPreview();
+    if (this.previewCar) { this.previewCar.group.visible = false; }
+    this.lookPreview = new Player(this.scene, this.progression.look);
+    this.lookPreviewAngle = 0.35;
+    this.lookPreviewSpin = 0;
+    this.state = 'character';
+    this.previewMode = 'character';
+    this.worldActive = false;
+    this.hud.show(false);
+    // a little turntable under the boots so the figure is not floating
+    const disc = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.45, 1.55, 0.12, 28),
+      new THREE.MeshStandardMaterial({ color: '#1a2028', roughness: 0.55, metalness: 0.5 })
+    );
+    disc.position.y = 0.06;
+    this.lookPreview.group.add(disc);
+    this.lookPreview.group.position.set(0, 0, 0);
+    this.lookPreview.rig.rotation.y = Math.PI;
+    for (const m of this.lookPreview.materials) m.envMapIntensity = 1;
+    return this.lookPreview;
+  }
+
+  spinLookPreview() { this.lookPreviewSpin = 2.6; }
+
+  refreshPlayerLook() {
+    if (this.player) this.player.setLook(this.progression.look);
+  }
+
+  updateLookPreview(dt) {
+    const look = this.lookPreview;
+    if (!look) return;
+    this.lookPreviewAngle += this.lookPreviewSpin * dt;
+    if (this.lookPreviewSpin > 0) this.lookPreviewSpin = Math.max(0, this.lookPreviewSpin - dt * 0.55);
+    if (this.input.mouse.left || Math.abs(this.input.mouse.dx) > 0.5) this.lookPreviewAngle += this.input.mouse.dx * 0.007;
+    const r = 3.1;
+    const y = 1.15 + (this.input.mouse.dy * 0.004);
+    this.camera.position.set(Math.sin(this.lookPreviewAngle) * r, clamp(y, 0.5, 2.3), Math.cos(this.lookPreviewAngle) * r);
+    this.camera.lookAt(0, 1.0, 0);
+    this.camera.fov = damp(this.camera.fov, 42, 6, dt);
+    this.camera.updateProjectionMatrix();
+    look.group.rotation.y = 0;
+    look.group.position.set(0, 0.12, 0);
+    // idle pose so the figure does not stand like a mannequin
+    look.speed = 0;
+    look.anim.phase += dt * 0.9;
+    look.torso.position.y = 0.10 + Math.sin(look.anim.phase * 1.2) * 0.006;
+    look.headGroup.rotation.y = Math.sin(look.anim.phase * 0.35) * 0.12;
+    this.env.update(dt, this.camera);
+    this.city.update(dt, this.camera);
+    this.city.updateLights(this.env.nightAmount, this.camera, QUALITY[this.qualityName].lampLights);
+    this.audio.updateAmbience(this.env.nightAmount, 0, true);
+  }
+
+  exitLookPreview() {
+    if (!this.lookPreview) return false;
+    this.scene.remove(this.lookPreview.group);
+    this.lookPreview.dispose();
+    this.lookPreview = null;
+    if (this.previewCar) this.previewCar.group.visible = true;
+    return true;
+  }
+
   updatePreviewCamera(dt) {
     // orbit the car in the garage / showroom
     const anchor = this.previewAnchor || new THREE.Vector3(0, 0, 0);
@@ -741,6 +812,10 @@ export class Game {
   update(dt, raw) {
     const st = this.state;
     if (st === 'menu') return;
+    if (st === 'character') {
+      this.updateLookPreview(dt);
+      return;
+    }
     if (st === 'garage' || st === 'tune' || st === 'dealer') {
       this.updatePreviewCamera(dt);
       // live clock for the backdrop
@@ -872,14 +947,19 @@ export class Game {
 
   updateVehicleVisual(v, dt) {
     const vis = v.visual;
-    vis.group.position.set(v.x, 0.16, v.z);
+    // ride height, plus the surface tilt when the car is on a ramp
+    const y = 0.16 + (v.y || 0);
+    vis.group.position.set(v.x, y, v.z);
     vis.group.rotation.y = v.heading;
+    const tilt = v.airborne ? 0 : (v.tiltPitch || 0);
+    vis.group.rotation.z = tilt;
+    vis.group.rotation.x = v.airborne ? -clamp(v.vy * 0.02, -0.12, 0.14) : (v.tiltRoll || 0);
     const wheelSpinDelta = (v.longSpeed / v.def.body.wheelR) * dt + (v.wheelspinAmount || 0) * dt * 8;
     vis.update(dt, {
       steer: clamp(v.steerAngle * 2.0, -0.8, 0.8),
       wheelDelta: wheelSpinDelta,
       suspension: v.suspension,
-      pitch: v.pitch * 0.55,
+      pitch: v.pitch * 0.55 + (v.airborne ? 0 : 0),
       roll: v.roll * 0.7,
     });
     // body damage tint
@@ -898,6 +978,7 @@ export class Game {
     const near = this.city.colliders.query(v.x, v.z, r + 6);
     for (const c of near) {
       if (c.height < 0.4) continue;
+      if ((c.baseY || 0) > (v.y || 0) + 1.2) continue;   // bridge parapet: drive under it
       const closest = closestPointOnBox(v.x, v.z, c);
       const dx = v.x - closest.x, dz = v.z - closest.z;
       const d = Math.hypot(dx, dz);
@@ -922,6 +1003,17 @@ export class Game {
 
   handleVehicleEvents(v) {
     const ev = v.events;
+    if (ev.landing > 0) {
+      const heavy = ev.landing > 5;
+      if (heavy) {
+        this.audio.impact(Math.min(1, ev.landing / 16));
+        this.cameraRig.addShake(Math.min(0.7, ev.landing / 20));
+        v.health = Math.max(0.35, v.health - clamp((ev.landing - 5) * 0.012, 0, 0.18));
+      } else if (ev.landing > 1.6) {
+        this.cameraRig.addShake(0.12);
+      }
+      ev.landing = 0;
+    }
     if (ev.shift) { this.audio.shiftBlip(); ev.shift = 0; }
     if (ev.backfire > 0.6) { this.audio.backfire(); ev.backfire = 0; }
     if (ev.driftStart) {
@@ -975,6 +1067,7 @@ export class Game {
       else if (poi.type === 'meet') prompt = `Car meet — ${poi.name}`;
       else if (poi.type === 'gas') prompt = 'Fuel up / repair car';
       else if (poi.type === 'drift') prompt = `Drift yard — ${poi.name}`;
+      else if (poi.type === 'driver') prompt = `Customise your driver — ${poi.name}`;
       candidates.push({ d, prompt, action });
     }
     for (const ev of EVENTS) {
@@ -1025,8 +1118,9 @@ export class Game {
       return;
     }
     if (action === 'locked') { this.audio.ui('error'); this.hud.toast('REPUTATION TOO LOW FOR THIS EVENT', 'warn'); return; }
-    if (action === 'garage') { this.state = 'garage'; this.enterPreview(this.progression.activeCar() ? CAR_BY_ID[this.progression.activeCar().defId] : CAR_BY_ID['muscle_coronet'], this.progression.activeCar().mods, 'garage'); this.screens.showOnly('garage'); this.screens.openGarage(); return; }
-    if (action === 'tune') { this.enterPreview(this.progression.activeCar() ? CAR_BY_ID[this.progression.activeCar().defId] : CAR_BY_ID['muscle_coronet'], this.progression.activeCar().mods, 'tune'); this.screens.showOnly('tuning'); this.screens.openTuning(this.progression.data.activeCar); return; }
+    if (action === 'garage') { this.state = 'garage'; this.enterPreview(this.progression.activeCar() ? CAR_BY_ID[this.progression.activeCar().defId] : CAR_BY_ID['coupe_bavar'], this.progression.activeCar().mods, 'garage'); this.screens.showOnly('garage'); this.screens.openGarage(); return; }
+    if (action === 'tune') { this.enterPreview(this.progression.activeCar() ? CAR_BY_ID[this.progression.activeCar().defId] : CAR_BY_ID['coupe_bavar'], this.progression.activeCar().mods, 'tune'); this.screens.showOnly('tuning'); this.screens.openTuning(this.progression.data.activeCar); return; }
+    if (action === 'driver') { this.screens.showOnly('character'); this.screens.open('character', { from: 'world' }); return; }
     if (action === 'dealer') { this.screens.showOnly('dealership'); this.screens.openDealer(); this.state = 'dealer'; this.worldActive = false; return; }
     if (action === 'meet') {
       const ev = EVENTS.find((e) => e.id === 'meet_show');

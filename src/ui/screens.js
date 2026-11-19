@@ -5,6 +5,7 @@ import { PARTS, TUNE_CATEGORIES, SUB_NAMES, CAR_DEFS, CAR_BY_ID, computeStats, d
   PAINT_PRESETS, carValue, rankFor, FACTIONS } from '../data/cars.js';
 import { formatMoney, formatTime, clamp, ordinal, hexToRgb, rgbToHex } from '../core/util.js';
 import { EVENTS } from '../world/layout.js';
+import { LOOK_OPTIONS, LOOK_LABELS, OUTFITS, BUILD_SCALE, defaultLook } from '../data/look.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -33,6 +34,7 @@ export class Screens {
       case 'menu': this.refreshMenu(); break;
       case 'garage': this.openGarage(); break;
       case 'tuning': this.openTuning(opts.car); break;
+      case 'character': this.openCharacter(opts); break;
       case 'dealership': this.openDealer(); break;
       case 'settings': this.syncSettings(); break;
       case 'pause': break;
@@ -54,7 +56,7 @@ export class Screens {
 
   // hide every overlay screen (the pause menu is a separate layer)
   showOnly(name) {
-    for (const id of ['menu', 'pause', 'settings', 'credits', 'garage', 'tuning', 'dealership', 'map-screen', 'results', 'brief']) {
+    for (const id of ['menu', 'pause', 'settings', 'credits', 'garage', 'tuning', 'dealership', 'character', 'map-screen', 'results', 'brief']) {
       this.hide(id);
     }
     this.current = null;
@@ -89,6 +91,8 @@ export class Screens {
     }
     $('btn-garage-menu').disabled = !d;
     $('btn-dealer-menu').disabled = !d;
+    const dm = $('btn-driver-menu');
+    if (dm) dm.disabled = !d;
   }
 
   // ---------------- garage ----------------
@@ -185,6 +189,139 @@ export class Screens {
     p.save();
     this.game.audio.ui('confirm');
     this.game.exitPreviewToWorld();
+  }
+
+  // ---------------- driver customisation ----------------
+  openCharacter(opts = {}) {
+    this.charFrom = opts.from || (this.game.worldActive ? 'world' : 'garage');
+    this.charPreview = this.game.enterLookPreview();
+    this.charTab = 'body';
+    $('char-money').textContent = formatMoney(this.game.progression.money);
+    this.renderCharTabs();
+    this.selectCharTab(this.charTab);
+  }
+
+  renderCharTabs() {
+    const wrap = $('char-tabs');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+    const tabs = [
+      { id: 'body', name: 'BODY' }, { id: 'hair', name: 'HAIR' },
+      { id: 'outfit', name: 'OUTFIT' }, { id: 'build', name: 'BUILD' },
+    ];
+    for (const t of tabs) {
+      const d = document.createElement('div');
+      d.className = 'tuning-tab' + (t.id === this.charTab ? ' active' : '');
+      d.innerHTML = `<span class="tt-dot"></span><span>${t.name}</span>`;
+      d.addEventListener('click', () => { this.game.audio.ui('click'); this.selectCharTab(t.id); });
+      wrap.appendChild(d);
+    }
+  }
+
+  selectCharTab(id) {
+    this.charTab = id;
+    const wrap = $('char-options');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+    const look = this.game.progression.look;
+    const title = $('char-cat-title');
+    const sub = $('char-cat-sub');
+    const rows = [];
+    if (id === 'body') {
+      title.textContent = 'BODY';
+      sub.textContent = 'SKIN, TRIM AND SHOES';
+      rows.push({ key: 'skin', kind: 'color', list: LOOK_OPTIONS.skin });
+      rows.push({ key: 'accent', kind: 'color', list: LOOK_OPTIONS.accent });
+      rows.push({ key: 'shoe', kind: 'color', list: LOOK_OPTIONS.shoe });
+    } else if (id === 'hair') {
+      title.textContent = 'HAIR';
+      sub.textContent = 'CUT AND COLOUR';
+      rows.push({ key: 'hairStyle', kind: 'style', list: LOOK_OPTIONS.hairStyle });
+      rows.push({ key: 'hair', kind: 'color', list: LOOK_OPTIONS.hair });
+    } else if (id === 'outfit') {
+      title.textContent = 'OUTFIT';
+      sub.textContent = 'WHAT YOU WEAR TO THE LINE';
+      rows.push({ key: 'outfit', kind: 'outfit', list: OUTFITS });
+      rows.push({ key: 'jacket', kind: 'color', list: LOOK_OPTIONS.jacket });
+      rows.push({ key: 'pants', kind: 'color', list: LOOK_OPTIONS.pants });
+    } else {
+      title.textContent = 'BUILD';
+      sub.textContent = 'SHOULDER LINE AND FRAME';
+      rows.push({ key: 'build', kind: 'build', list: BUILD_SCALE });
+    }
+    for (const row of rows) this.renderCharRow(wrap, row, look);
+    // a free-form colour input for the skin / cloth rows
+    const pick = document.createElement('input');
+    pick.type = 'color';
+    pick.id = 'char-custom-colour';
+    pick.value = look[rows[0].key] && rows[0].kind === 'color' ? look[rows[0].key] : '#ffffff';
+    pick.title = 'Any colour for ' + (LOOK_LABELS[rows[0].key] || rows[0].key);
+    pick.style.cssText = 'position:absolute;opacity:0;pointer-events:none';
+    wrap.appendChild(pick);
+    pick.addEventListener('input', () => this.applyLook({ [rows[0].key]: pick.value }));
+    const hdr = document.createElement('div');
+    hdr.className = 'char-opt';
+    hdr.style.cursor = 'pointer';
+    hdr.innerHTML = `<div class="co-name">CUSTOM ${LOOK_LABELS[rows[0].key] || ''}</div>
+      <div class="co-swatch" style="background:linear-gradient(90deg,#ff0080,#ff8c00,#ffee00,#00ff90,#00b3ff,#7a00ff)"></div>`;
+    hdr.addEventListener('click', () => {
+      if (this.game.audio) this.game.audio.ui('click');
+      pick.click();
+    });
+    wrap.appendChild(hdr);
+  }
+
+  renderCharRow(wrap, row, look) {
+    for (let i = 0; i < row.list.length; i++) {
+      const val = row.list[i];
+      const name = row.kind === 'color' ? val.toUpperCase()
+        : (typeof val === 'string' ? val : val.name);
+      const selected = row.kind === 'color' ? String(look[row.key]).toLowerCase() === val.toLowerCase() : look[row.key] === i;
+      const d = document.createElement('div');
+      d.className = 'char-opt' + (selected ? ' sel' : '');
+      if (row.kind === 'color') {
+        d.innerHTML = `<div class="co-swatch" style="background:${val}"></div><div class="co-name">${name}</div>`;
+      } else if (row.kind === 'build') {
+        const w = 10 + i * 7;
+        d.innerHTML = `<div class="co-figure"><i style="width:${w}px;height:44px"></i><i style="width:${w}px;height:18px"></i></div>
+          <div class="co-name">${val.name}</div>`;
+      } else if (row.kind === 'outfit') {
+        const o = OUTFITS[i];
+        const col = o.jacket || look.jacket;
+        const pant = o.pants || look.pants;
+        d.innerHTML = `<div class="co-figure"><i style="width:22px;height:40px;background:${col}"></i><i style="width:22px;height:22px;background:${pant}"></i></div>
+          <div class="co-name">${o.name}</div>`;
+      } else {
+        d.innerHTML = `<div class="co-figure"><i style="width:26px;height:26px;border-radius:50%;background:${look.hair}"></i></div>
+          <div class="co-name">${name}</div>`;
+      }
+      d.addEventListener('click', () => {
+        if (this.game.audio) this.game.audio.ui('click');
+        this.applyLook({ [row.key]: row.kind === 'color' ? val : i });
+        this.selectCharTab(this.charTab);   // re-render the selection state
+      });
+      wrap.appendChild(d);
+    }
+  }
+
+  applyLook(patch) {
+    const p = this.game.progression;
+    if (!p.data) return;
+    p.setLook(patch);
+    this.game.refreshPlayerLook();
+    if (this.charPreview) this.charPreview.setLook(p.look);
+  }
+
+  closeCharacter() {
+    const p = this.game.progression;
+    p.save();
+    this.game.exitLookPreview();
+    if (this.charFrom === 'world') {
+      this.showOnly(null);
+      this.game.returnToWorld();
+    } else {
+      this.open('garage');
+    }
   }
 
   // ---------------- tuning ----------------
@@ -558,6 +695,7 @@ export class Screens {
     on('btn-continue', () => g.continueGame());
     on('btn-newgame', () => { g.startNewGame(); });
     on('btn-garage-menu', () => this.open('garage'));
+    on('btn-driver-menu', () => { this.showOnly('character'); this.open('character', { from: 'garage' }); });
     on('btn-dealer-menu', () => this.open('dealership'));
     on('btn-settings-menu', () => { this.settingsScreenTarget = 'menu'; this.open('settings'); });
     on('btn-credits', () => this.open('credits'));
@@ -581,6 +719,7 @@ export class Screens {
     on('btn-garage-close', () => this.closeToWorld());
     on('btn-garage-drive', () => this.driveOut(this.garageSelection));
     on('btn-garage-tune', () => this.open('tuning', { car: this.garageSelection }));
+    on('btn-garage-driver', () => { this.open('character', { from: 'garage' }); });
     on('btn-garage-sell', () => {
       const p = g.progression;
       const car = this.getGarageCar();
@@ -595,6 +734,27 @@ export class Screens {
       this.garageSelection = p.data.activeCar;
       p.save();
       this.openGarage();
+    });
+
+    // character customisation
+    on('btn-char-close', () => this.closeCharacter());
+    on('btn-char-done', () => this.closeCharacter());
+    on('btn-char-preview', () => { g.spinLookPreview(); });
+    on('btn-char-random', () => {
+      const rnd = (list) => list[Math.floor(Math.random() * list.length)];
+      this.applyLook({
+        skin: rnd(LOOK_OPTIONS.skin), hair: rnd(LOOK_OPTIONS.hair),
+        jacket: rnd(LOOK_OPTIONS.jacket), accent: rnd(LOOK_OPTIONS.accent),
+        pants: rnd(LOOK_OPTIONS.pants), shoe: rnd(LOOK_OPTIONS.shoe),
+        hairStyle: Math.floor(Math.random() * LOOK_OPTIONS.hairStyle.length),
+        build: Math.floor(Math.random() * BUILD_SCALE.length),
+        outfit: Math.floor(Math.random() * OUTFITS.length),
+      });
+      this.selectCharTab(this.charTab);
+    });
+    on('btn-char-reset', () => {
+      this.applyLook(defaultLook());
+      this.selectCharTab(this.charTab);
     });
 
     // tuning

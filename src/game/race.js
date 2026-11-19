@@ -460,7 +460,7 @@ export class RaceDirector {
         ai.update(dt, { others, world: this.game.city, playerProgress: myProg, ownProgress: o.raceProgress || 0 });
       }
       const v = o.vehicle;
-      o.visual.group.position.set(v.x, 0, v.z);
+      o.visual.group.position.set(v.x, 0.16 + (v.y || 0), v.z);
       o.visual.group.rotation.y = v.heading;
       o.visual.update(dt, {
         steer: clamp(v.steerAngle * 1.8, -0.7, 0.7), wheelDelta: (v.longSpeed / v.def.body.wheelR) * dt,

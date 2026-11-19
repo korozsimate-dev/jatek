@@ -52,7 +52,7 @@ export class Vehicle {
     this.id = def.id;
 
     // audio/visual event flags (consumed by presentation layer)
-    this.events = { shift: 0, backfire: 0, scrape: 0, impact: 0, driftStart: 0, wheelspin: 0 };
+    this.events = { shift: 0, backfire: 0, scrape: 0, impact: 0, driftStart: 0, wheelspin: 0, landing: 0 };
     this.nitro = 1;
     this.nitroActive = false;
     this.throttleAmount = 0;
@@ -79,6 +79,13 @@ export class Vehicle {
     this.suspension = [0, 0, 0, 0];
     this.health = 1;
     this.airborne = false;
+    this.y = 0;              // height of the contact patch above the street
+    this.vy = 0;             // vertical velocity (m/s)
+    this.airTime = 0;
+    this.slopeVy = 0;
+    this.tiltPitch = 0;      // body angle from the surface under the wheels
+    this.tiltRoll = 0;
+    this.landImpact = 0;
     this.wheelspinAmount = 0;
     this.speed = 0;
     this.accelG = 0;
@@ -133,6 +140,9 @@ export class Vehicle {
     const steerIn = clamp(input.steer || 0, -1, 1);
     const hbIn = clamp(input.handbrake || 0, 0, 1);
     this.throttleAmount = Math.abs(throttle);
+    // In the air the tyres have nothing to push against: engine, brakes and
+    // lateral grip are suspended until the wheels touch down again.
+    const air = this.airborne;
 
     // --- steering: speed sensitive, smoothed ---
     // Steering locks off faster than before: 0.045 left the car with almost full
@@ -160,7 +170,9 @@ export class Vehicle {
     const torque = this._torqueAtRpm(this.rpm);
     const wheelR = this.def.body.wheelR;
     let engineForce = 0;
-    if (throttle > 0 && this.shiftTimer <= 0) {
+    if (air) {
+      engineForce = 0;
+    } else if (throttle > 0 && this.shiftTimer <= 0) {
       engineForce = (torque * gearRatio * finalDrive * driveEff * throttle) / wheelR;
       // physical power ceiling (forces fall away as speed rises)
       const Fmax = (P.power * 1.9) / Math.max(absV, 3.0);
@@ -184,14 +196,16 @@ export class Vehicle {
 
     // brakes
     let brakeForce = 0;
-    if (brakeIn > 0 && vLong > 0.35) {
+    if (air) {
+      this.braking = 0;
+    } else if (brakeIn > 0 && vLong > 0.35) {
       brakeForce = -brakeIn * P.mass * (6.5 + P.brake * 9);
       this.braking = brakeIn;
     } else this.braking = 0;
     // handbrake
     let hbForce = 0;
-    if (hbIn > 0.1) hbForce = -Math.sign(vLong) * hbIn * P.mass * 5.5;
-    this.handbrake = hbIn;
+    if (!air && hbIn > 0.1) hbForce = -Math.sign(vLong) * hbIn * P.mass * 5.5;
+    this.handbrake = air ? 0 : hbIn;
 
     // drag + rolling resistance. Drag is calibrated so the car's stated
     // top speed is reachable at around 6500 rpm in top gear.
@@ -249,8 +263,8 @@ export class Vehicle {
       const shaped = a <= 1 ? a * (2 - a) : 1 - Math.min(0.22, (a - 1) * 0.09);
       return Math.sign(x) * shaped;
     };
-    let fyF = -sat(alphaF * stiffF) * muFW * loadFc;
-    let fyR = -sat(alphaR * stiffR) * muRW * loadRc;
+    let fyF = air ? 0 : -sat(alphaF * stiffF) * muFW * loadFc;
+    let fyR = air ? 0 : -sat(alphaR * stiffR) * muRW * loadRc;
 
     // low speed: fade forces to avoid jitter while parked
     if (absV < 0.8) { fyF *= absV / 0.8; fyR *= absV / 0.8; }
@@ -300,7 +314,10 @@ export class Vehicle {
     const latDemand = Math.abs(yawWanted * vLong);
     const gripUse = clamp(latDemand / Math.max(1, gripLat), 0, 2.2);
 
-    if (this.assists) {
+    if (air) {
+      // nothing to grip: the body keeps the spin it left the ramp with
+      yawAccel -= yawRate * 0.45;
+    } else if (this.assists) {
       // follow the steering: fast, but with a little lag so it feels weighty
       // the handbrake loosens the controller: the tail is allowed to lead
       const follow = 7.0 * (1 - 0.72 * hbIn);
@@ -346,6 +363,9 @@ export class Vehicle {
     this.x += this.vx * dt;
     this.z += this.vz * dt;
 
+    // --- vertical: ramps, bridges, jumps and landings -------------------
+    this._updateHeight(dt, g, world);
+
     // --- derived values for presentation ---
     this.longSpeed = vLong;
     this.lateralSpeed = vLat;
@@ -383,6 +403,86 @@ export class Vehicle {
     if (this.events.backfire > 0) this.events.backfire -= dt * 3;
     if (this.events.impact > 0) this.events.impact -= dt * 3;
     return this;
+  }
+
+  // Ground height + slope at a point. `world` is the city (it exposes
+  // surfaceHeightAt); anything else is treated as flat street level.
+  _groundAt(world, x, z) {
+    const fn = world?.surfaceHeightAt;
+    return fn ? (fn.call(world, x, z, this.y + 0.8) || 0) : 0;
+  }
+
+  // Vertical integration. The car is a point on a height field: the wheels
+  // follow the surface, and when the surface falls away faster than gravity
+  // can pull the car down (a ramp lip) the car goes airborne, keeps its
+  // horizontal momentum, and lands with a real impact.
+  _updateHeight(dt, g, world) {
+    const B = this.def.body;
+    const wheel = B.wheelbase * 0.5;
+    const hx = Math.cos(this.heading) * wheel;
+    const hz = -Math.sin(this.heading) * wheel;
+    const fx = this.x + hx, fz = this.z + hz;
+    const rx = this.x - hx, rz = this.z - hz;
+    const hF = this._groundAt(world, fx, fz);
+    const hR = this._groundAt(world, rx, rz);
+    // the contact patch sits under the middle of the car
+    const ground = Math.max(hF, hR, this._groundAt(world, this.x, this.z));
+    // body attitude follows the surface under the axles
+    const tiltTarget = Math.atan2(hF - hR, B.wheelbase);
+    const halfTrack = B.track * 0.5;
+    const rvx = Math.sin(this.heading) * halfTrack, rvz = Math.cos(this.heading) * halfTrack;
+    const hLft = this._groundAt(world, this.x - rvx, this.z - rvz);
+    const hRgt = this._groundAt(world, this.x + rvx, this.z + rvz);
+    const rollTarget = Math.atan2(hRgt - hLft, B.track);
+
+    if (this.airborne) {
+      this.vy -= g * dt;
+      this.y += this.vy * dt;
+      this.airTime += dt;
+      this.tiltPitch += (tiltTarget * 0.4 - this.tiltPitch) * Math.min(1, dt * 1.2);
+      this.tiltRoll += (0 - this.tiltRoll) * Math.min(1, dt * 1.2);
+      if (this.y <= ground) {
+        // touchdown
+        const impact = Math.abs(this.vy);
+        this.y = ground;
+        this.vy = 0;
+        this.airborne = false;
+        this.landImpact = impact;
+        this.events.landing = Math.max(this.events.landing, impact);
+        // a heavy landing costs speed and shakes the body, but never spins it
+        if (impact > 3) {
+          const scrub = clamp((impact - 3) * 0.035, 0, 0.35);
+          this.vx *= 1 - scrub;
+          this.vz *= 1 - scrub;
+          this.pitchVel += clamp(impact * 0.02, 0, 0.5);
+          this.landImpact = Math.min(1, impact / 14);
+        }
+        this.airTime = 0;
+      }
+    } else {
+      const climb = ground - this.y;
+      const rate = dt > 1e-5 ? climb / dt : 0;
+      if (climb < -0.28) {
+        // the ground dropped away: launch, carrying the ramp's slope upward
+        this.airborne = true;
+        this.airTime = 0;
+        this.vy = Math.max(0, this.slopeVy) * 0.92;
+        this.y = this.y + this.vy * dt;
+      } else {
+        // hug the surface; a ramp pushes the car up with it
+        this.slopeVy = climb >= 0 ? rate : Math.max(0, this.slopeVy * 0.5);
+        this.y = ground;
+        this.vy = 0;
+      }
+      this.landImpact *= Math.exp(-dt * 6);
+    }
+    // never leave the playfield hanging in the air
+    if (this.y < -0.5) { this.y = 0; this.vy = 0; this.airborne = false; }
+    const k = Math.min(1, dt * 14);
+    this.tiltPitch += (tiltTarget - this.tiltPitch) * k;
+    this.tiltRoll += (rollTarget - this.tiltRoll) * k;
+    this.groundY = ground;
+    this.surfaceHeight = ground;
   }
 
   _updateGearbox(dt, throttle, brakeIn) {

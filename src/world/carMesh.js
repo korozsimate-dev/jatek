@@ -112,7 +112,7 @@ function loftBody(sections, def) {
   }
 
   const B = def.body;
-  const archR = B.wheelR * 1.10;
+  const archR = B.wheelR * (1.10 + (B.archCut ?? 0));
   const axleF = B.wheelbase / 2, axleR = -B.wheelbase / 2;
   const archCentreY = B.wheelR;
   // is the quad between these two sections and ring rows inside a wheel arch?
@@ -356,7 +356,7 @@ function bodySections(def) {
     let whf = 1.0;
     whf *= 1 - clamp01((f - 0.94) / 0.06) * 0.14;
     whf *= 1 - clamp01((0.05 - f) / 0.05) * 0.10;
-    const flare = (bump(x, axleF, B.wheelbase * 0.30) + bump(x, axleR, B.wheelbase * 0.30)) * 0.030;
+    const flare = (bump(x, axleF, B.wheelbase * 0.30) + bump(x, axleR, B.wheelbase * 0.30)) * (0.030 + (B.archFlare ?? 0));
     whf += flare;
 
     sections.push({
@@ -801,15 +801,17 @@ export class CarVisual {
     const headY = noseSurf.yBot + (noseSurf.yTop - noseSurf.yBot) * 0.62 + lampH * 0.5;
     const tailY = tailSurf.yBot + (tailSurf.yTop - tailSurf.yBot) * 0.58 + lampH * 0.5;
     for (const sgn of [1, -1]) {
-      const hl = new THREE.Mesh(new THREE.BoxGeometry(0.07, lampH, lampW), headMat);
-      hl.position.set(noseX - 0.16, headY, sgn * noseSurf.hw * 0.58);
+      // the lamp sits ON the nose cap, sticking out a couple of centimetres:
+      // buried inside the body it would be invisible from the front
+      const hl = new THREE.Mesh(new THREE.BoxGeometry(0.09, lampH, lampW), headMat);
+      hl.position.set(noseX - 0.025, headY, sgn * noseSurf.hw * 0.58);
       this.bodyGroup.add(hl); this.parts.push(hl);
-      const tl = new THREE.Mesh(new THREE.BoxGeometry(0.06, lampH, lampW * 1.1), tailMat);
-      tl.position.set(-noseX + 0.14, tailY, sgn * tailSurf.hw * 0.56);
+      const tl = new THREE.Mesh(new THREE.BoxGeometry(0.08, lampH, lampW * 1.1), tailMat);
+      tl.position.set(-noseX + 0.015, tailY, sgn * tailSurf.hw * 0.56);
       this.bodyGroup.add(tl); this.parts.push(tl);
       // reverse lamp
       const rv = new THREE.Mesh(new THREE.BoxGeometry(0.05, lampH * 0.30, lampW * 0.24), revMat);
-      rv.position.set(-noseX + 0.13, tailY - lampH * 0.02, sgn * tailSurf.hw * 0.24);
+      rv.position.set(-noseX + 0.06, tailY - lampH * 0.02, sgn * tailSurf.hw * 0.24);
       this.bodyGroup.add(rv); this.parts.push(rv);
     }
     // third brake light
@@ -826,9 +828,57 @@ export class CarVisual {
     const trimMat = new THREE.MeshStandardMaterial({ color: '#14171b', roughness: 0.55, metalness: 0.35 });
     const carbonMat = new THREE.MeshPhysicalMaterial({ color: '#0c0e10', roughness: 0.3, metalness: 0.6, clearcoat: 1 });
 
-    const grille = new THREE.Mesh(new THREE.BoxGeometry(0.06, B.height * 0.13, noseSurf.hw * 0.86), trimMat);
-    grille.position.set(noseX - 0.05, headY - lampH * 0.55, 0);
-    this.bodyGroup.add(grille); this.parts.push(grille);
+    if (B.grille === 'kidney') {
+      // The signature twin-kidney nose, plus the wide M lower intake: two
+      // upright chrome-ringed kidneys with black mesh between them.
+      const chromeRing = new THREE.MeshStandardMaterial({ color: '#d6dde4', roughness: 0.18, metalness: 1.0 });
+      const kidneyY = headY - lampH * 0.52;
+      const kidneyH = B.height * 0.115;
+      for (const sgn of [1, -1]) {
+        const ring = new THREE.Mesh(new THREE.BoxGeometry(0.055, kidneyH, noseSurf.hw * 0.30), chromeRing);
+        ring.position.set(noseX - 0.045, kidneyY, sgn * noseSurf.hw * 0.205);
+        this.bodyGroup.add(ring); this.parts.push(ring);
+        const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.035, kidneyH * 0.80, noseSurf.hw * 0.25), trimMat);
+        mesh.position.set(noseX - 0.028, kidneyY, sgn * noseSurf.hw * 0.205);
+        this.bodyGroup.add(mesh); this.parts.push(mesh);
+        for (let k = -1; k <= 1; k++) {
+          const bar = new THREE.Mesh(new THREE.BoxGeometry(0.022, kidneyH * 0.74, 0.018), chromeRing);
+          bar.position.set(noseX - 0.014, kidneyY, sgn * noseSurf.hw * 0.205 + k * noseSurf.hw * 0.065);
+          this.bodyGroup.add(bar); this.parts.push(bar);
+        }
+      }
+      // wide lower intake under the bumper, with a dark mesh panel
+      const intake = new THREE.Mesh(new THREE.BoxGeometry(0.06, B.height * 0.10, noseSurf.hw * 1.15), trimMat);
+      intake.position.set(noseX - 0.06, Math.max(0.30, noseSurf.yBot + 0.14), 0);
+      this.bodyGroup.add(intake); this.parts.push(intake);
+      // the two round fog lamps either side of it
+      const fogMat = new THREE.MeshStandardMaterial({ color: '#e8f0f8', emissive: new THREE.Color('#cfe6ff'), emissiveIntensity: 0.5, roughness: 0.25 });
+      for (const sgn of [1, -1]) {
+        const fog = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.05, 10), fogMat);
+        fog.rotation.z = Math.PI / 2;
+        fog.position.set(noseX - 0.04, Math.max(0.34, noseSurf.yBot + 0.30), sgn * noseSurf.hw * 0.62);
+        this.bodyGroup.add(fog); this.parts.push(fog);
+      }
+    } else {
+      const grille = new THREE.Mesh(new THREE.BoxGeometry(0.06, B.height * 0.13, noseSurf.hw * 0.86), trimMat);
+      grille.position.set(noseX - 0.05, headY - lampH * 0.55, 0);
+      this.bodyGroup.add(grille); this.parts.push(grille);
+    }
+
+    // M-style side gills behind the front arch: a chrome blade and a vent
+    if (B.gills) {
+      const gillX = B.wheelbase / 2 - B.wheelR * 1.35 - 0.34;
+      const gillSurf = surfaceAt(gillX);
+      for (const sgn of [1, -1]) {
+        const vent = new THREE.Mesh(new THREE.BoxGeometry(0.30, 0.085, 0.035), trimMat);
+        vent.position.set(gillX, gillSurf.yTop - 0.16, sgn * (gillSurf.hw + 0.004));
+        vent.rotation.z = 0.16;
+        this.bodyGroup.add(vent); this.parts.push(vent);
+        const blade = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.022, 0.030), trimMat);
+        blade.position.set(gillX, gillSurf.yTop - 0.115, sgn * (gillSurf.hw + 0.006));
+        this.bodyGroup.add(blade); this.parts.push(blade);
+      }
+    }
 
     // front lip / splitter
     if (fbStyle >= 1) {
@@ -1046,6 +1096,13 @@ export class CarVisual {
       tip.rotation.z = Math.PI / 2;
       tip.position.set(-noseX + 0.05, Math.max(0.20, tailSurf.yBot + 0.05), -hw * 0.55);
       this.bodyGroup.add(tip); this.parts.push(tip);
+      // the twin-tip factory system on the coupé: one more pipe beside it
+      if (B.quadTip) {
+        const tip2 = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.040, 0.13, 10), tipMat);
+        tip2.rotation.z = Math.PI / 2;
+        tip2.position.set(-noseX + 0.05, Math.max(0.20, tailSurf.yBot + 0.05), -hw * 0.55 + 0.13);
+        this.bodyGroup.add(tip2); this.parts.push(tip2);
+      }
     }
 
     // ---- mirrors: mounted on the belt line just behind the A pillar ----

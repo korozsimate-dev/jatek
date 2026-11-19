@@ -62,6 +62,7 @@ export const POIS = {
   gas2: { x: 300, z: -60, name: 'SUNSET GAS', type: 'gas' },
   gas3: { x: -180, z: -300, name: 'CANYON STOP', type: 'gas' },
   garage2: { x: 180, z: -180, name: 'MIDTOWN GARAGE', type: 'garage' },
+  driver: { x: -282, z: 170, name: 'CUTS & CHROME', type: 'driver' },
 };
 
 export function spawnPoint() {
@@ -91,6 +92,76 @@ export function canyonRoad() {
     { x: -410, z: -376 },
     { x: -390, z: -420 },
   ];
+}
+
+// ----- stunt yard: ramps and the overpass bridge -------------------------
+// Everything the player can drive *over* is declared here, so the physics,
+// the meshes and the tests all read the same numbers.
+//
+// A structure is a rectangle in plan view:
+//   x, z     — the LOW end of the centre line (where you drive on)
+//   dx, dz   — unit direction of travel up the structure
+//   length   — run along that direction
+//   width    — usable carriageway width
+// A ramp rises linearly to `height` and then ends: the lip launches the car.
+// A bridge rises over `rampLen`, holds `deckY` for the deck and comes back
+// down over `rampLen`.
+export const RAMPS = [
+  // the stunt yard kicker: run up from the street at z = 300, launch north
+  { id: 'yard_kicker', x: 150, z: 292, dx: 0, dz: -1, length: 26, width: 11, height: 3.0 },
+];
+
+export const BRIDGES = [
+  // overpass across the Auto Row street (z = 180): it starts on the empty
+  // showroom apron, climbs over the traffic, and comes down inside the yard
+  { id: 'auto_row_bridge', x: 120, z: 140, dx: 0, dz: 1, length: 88, width: 11, deckY: 5.0, rampLen: 24 },
+];
+
+// How high is the drivable surface at (x, z)?
+//
+// `fromY` is the height the caller is currently at. A surface that lives more
+// than ~0.8 m above that is ignored, which is what lets a car drive *under*
+// the overpass on the street below without being teleported onto the deck,
+// while still climbing the approach ramp smoothly.
+export function surfaceHeightAt(x, z, fromY = Infinity) {
+  const reach = fromY + 0.8;
+  let h = 0;
+  for (const r of RAMPS) {
+    const px = x - r.x, pz = z - r.z;
+    const along = px * r.dx + pz * r.dz;
+    const side = Math.abs(px * -r.dz + pz * r.dx);
+    if (along < 0 || along > r.length || side > r.width / 2) continue;
+    const y = r.height * (along / r.length);
+    if (y > h && y <= reach) h = y;
+  }
+  for (const b of BRIDGES) {
+    const px = x - b.x, pz = z - b.z;
+    const along = px * b.dx + pz * b.dz;
+    const side = Math.abs(px * -b.dz + pz * b.dx);
+    if (along < 0 || along > b.length || side > b.width / 2) continue;
+    const up = b.deckY * (along / b.rampLen);
+    const down = b.deckY * ((b.length - along) / b.rampLen);
+    const y = Math.max(0, Math.min(b.deckY, up, down));
+    if (y > h && y <= reach) h = y;
+  }
+  return h;
+}
+
+// Is (x, z) on a structure at all? (used to keep scenery off the ramps)
+export function onStuntSurface(x, z, pad = 0) {
+  for (const r of RAMPS) {
+    const px = x - r.x, pz = z - r.z;
+    const along = px * r.dx + pz * r.dz;
+    const side = Math.abs(px * -r.dz + pz * r.dx);
+    if (along > -pad && along < r.length + pad && side < r.width / 2 + pad) return true;
+  }
+  for (const b of BRIDGES) {
+    const px = x - b.x, pz = z - b.z;
+    const along = px * b.dx + pz * b.dz;
+    const side = Math.abs(px * -b.dz + pz * b.dx);
+    if (along > -pad && along < b.length + pad && side < b.width / 2 + pad) return true;
+  }
+  return false;
 }
 
 // ----- race event definitions -------------------------------------------
@@ -148,6 +219,41 @@ export const EVENTS = [
     route: [[-180, -60], [-60, -60], [60, -60], [180, -60], [300, -60], [300, -180], [300, -300], [180, -300], [60, -300], [-60, -300], [-180, -300], [-180, -180]],
   },
   {
+    id: 'sprint_stunt', type: 'timeattack', name: 'HANGAR 16 RUN', district: 'AUTO ROW',
+    x: 150, z: 300, heading: Math.PI / 2,
+    fee: 0, prize: 2000, rep: 3, repReq: 0, laps: 1, opponents: 0, targetTime: 62,
+    desc: 'Straight off the street and up the kicker in the stunt yard, then a full lap over the Auto Row overpass. Hits the ramp flat out or you are already too slow.',
+    route: [[150, 292], [150, 266], [150, 236], [128, 220], [120, 196], [120, 176], [120, 152], [120, 120], [60, 120], [60, 180], [60, 240], [60, 300], [110, 300]],
+  },
+  {
+    id: 'circuit_autos', type: 'circuit', name: 'AUTO ROW CIRCUIT', district: 'AUTO ROW',
+    x: 180, z: 300, heading: 0,
+    fee: 600, prize: 4200, rep: 5, repReq: 4, laps: 2, opponents: 4,
+    desc: 'Two laps of the showroom district. Wide boulevards, four 90-degree corners and a freeway overpass to duck under.',
+    route: [[300, 300], [300, 180], [180, 180], [120, 180], [60, 180], [60, 300], [180, 300]],
+  },
+  {
+    id: 'sprint_palms', type: 'sprint', name: 'PALM HEIGHTS RUN', district: 'PALM HEIGHTS',
+    x: -420, z: 300, heading: Math.PI / 2,
+    fee: 900, prize: 5600, rep: 7, repReq: 6, laps: 1, opponents: 4,
+    desc: 'Flat out down the western boulevard, then a hard left onto the ring for the run home. Long gears matter here.',
+    route: [[-420, 180], [-420, 60], [-300, 60], [-180, 60], [-60, 60], [60, 60], [180, 60], [300, 60]],
+  },
+  {
+    id: 'drift_hangar', type: 'drift', name: 'HANGAR 16 DRIFT', district: 'AUTO ROW',
+    x: 120, z: 240, heading: 0,
+    fee: 200, prize: 3400, rep: 6, repReq: 3, laps: 2, opponents: 0, duration: 60, targetScore: 15000,
+    desc: 'The concrete yard behind the showrooms, with a kicker in the middle of it. Link the figure-eight and keep the multiplier alive.',
+    route: [[120, 212], [156, 240], [120, 272], [84, 240], [120, 212]],
+  },
+  {
+    id: 'delivery_2', type: 'delivery', name: 'COLD CHAIN', district: 'IRON YARDS',
+    x: 120, z: 420, heading: Math.PI,
+    fee: 0, prize: 2100, rep: 3, repReq: 2, laps: 1, opponents: 0, targetTime: 78,
+    desc: 'A second run for the dock foreman: the crate has to reach the Torque Lab before the ice melts.',
+    route: [[180, 390], [240, 300], [300, 240], [240, 240]],
+  },
+  {
     id: 'delivery_1', type: 'delivery', name: 'HOT CARGO', district: 'VELOR HARBOR',
     x: 60, z: 390, heading: 0,
     fee: 0, prize: 1400, rep: 2, repReq: 0, laps: 1, opponents: 0, targetTime: 70,
@@ -167,6 +273,9 @@ export const LOTS = [
   { id: 'dealerLot', x: 60, z: 180, w: 40, d: 30, kind: 'dealer' },
   { id: 'tuneLot', x: 240, z: 240, w: 38, d: 32, kind: 'tune' },
   { id: 'parkGarage', x: 120, z: -240, w: 34, d: 30, kind: 'garage' },
+  // stunt yard + the overpass approach: both blocks stay open pavement
+  { id: 'stuntLot', x: 120, z: 240, w: 92, d: 92, kind: 'stunt' },
+  { id: 'overpassLot', x: 120, z: 120, w: 92, d: 92, kind: 'stunt' },
 ];
 
 export const GAS_STATIONS = [

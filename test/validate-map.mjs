@@ -71,7 +71,9 @@ for (const lot of LOTS) {
 // buildings count as blockers.
 function clearRadius(x, z, r) {
   for (const c of city.colliderList) {
-    if (c.disabled || c.height < 0.5 || c.kind === 'prop') continue;
+    // anything with a base height is an elevated structure (the overpass
+    // parapet): the street runs underneath it, so it never blocks a route
+    if (c.disabled || c.height < 0.5 || c.kind === 'prop' || (c.baseY || 0) > 0.5) continue;
     const cx = Math.max(c.minX, Math.min(x, c.maxX));
     const cz = Math.max(c.minZ, Math.min(z, c.maxZ));
     if (Math.hypot(x - cx, z - cz) < r) return c;
@@ -106,7 +108,7 @@ if (clearRadius(sp.x, sp.z, 3.5)) report('player spawn is blocked');
 // ---- roads must be clear of buildings (props like palms/cones don't count) ----
 function clearOfBuildings(x, z, r) {
   for (const c of city.colliderList) {
-    if (c.disabled || c.kind === 'prop') continue;
+    if (c.disabled || c.kind === 'prop' || (c.baseY || 0) > 0.5) continue;
     const cx = Math.max(c.minX, Math.min(x, c.maxX));
     const cz = Math.max(c.minZ, Math.min(z, c.maxZ));
     if (Math.hypot(x - cx, z - cz) < r) return c;
